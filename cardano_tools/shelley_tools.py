@@ -281,12 +281,83 @@ class ShelleyTools():
             f"{self.cli} shelley transaction submit "
             f"--tx-file {tx_signed_file} {self.network}"
         )
-        #subprocess.run(arg.split())
+        subprocess.run(arg.split())
 
         # Delete the transaction files if specified.
         if cleanup:
             os.remove(tx_raw_file)
             os.remove(tx_signed_file)
+
+    def create_block_producing_keys(self, genesis_file, pool_name="pool", 
+        folder=None):
+        """Create keys for a block-producing node.
+        WARNING: You may want to use your local machine for this process
+        (assuming you have cardano-node and cardano-cli on it). Make sure you
+        are not online until you have put your cold keys in a secure storage and
+        deleted the files from you local machine.
+
+        The block-producing node or pool node needs:
+            Cold key pair,
+            VRF Key pair,
+            KES Key pair,
+            Operational Certificate
+        """
+
+        if folder is None:
+            folder = self.working_dir
+        folder = Path(folder)
+        folder.mkdir(parents=True, exist_ok=True)
+        
+        # Generate Cold Keys and a Cold_counter
+        cold_vkey = folder / (pool_name + "_cold.vkey")
+        cold_skey = folder / (pool_name + "_cold.skey")
+        cold_counter = folder / (pool_name + "_cold.counter")
+        arg = (
+            f"{self.cli} shelley node key-gen "
+            f"--cold-verification-key-file {cold_vkey} "
+            f"--cold-signing-key-file {cold_skey} "
+            f"--operational-certificate-issue-counter-file {cold_counter}"
+        )
+        subprocess.run(arg.split())
+
+        # Generate VRF Key pair
+        vrf_vkey = folder / (pool_name + "_vrf.vkey")
+        vrf_skey = folder / (pool_name + "_vrf.skey")
+        arg = (
+            f"{self.cli} shelley node key-gen-VRF "
+            f"--verification-key-file {vrf_vkey} "
+            f"--signing-key-file {vrf_skey}"
+        )
+        subprocess.run(arg.split())
+
+        # Generate the KES Key pair
+        kes_vkey = folder / (pool_name + "_kes.vkey")
+        kes_skey = folder / (pool_name + "_kes.skey")
+        arg = (
+            f"{self.cli} shelley node key-gen-KES "
+            f"--verification-key-file {kes_vkey} "
+            f"--signing-key-file {kes_skey}"
+        )
+        subprocess.run(arg.split())
+
+        # Get the network protocol parameters
+        with open(genesis_file, "r") as genfile:
+            genesis_parameters = json.load(genfile)
+
+        # Generate the Operational Certificate/
+        cert_file = folder / (pool_name + ".cert")
+        slots_kes_period = genesis_parameters["slotsPerKESPeriod"]
+        tip = self.get_tip()
+        kes_period = tip // slots_kes_period  # Integer division
+        arg = (
+            f"{self.cli} shelley node issue-op-cert "
+            f"--kes-verification-key-file {kes_vkey} "
+            f"--cold-signing-key-file {cold_skey} "
+            f"--operational-certificate-issue-counter {cold_counter} "
+            f"--kes-period {kes_period} --out-file {cert_file}"
+        )
+        subprocess.run(arg.split())
+
 
 if __name__ == "__main__":
     # Run Tests #
@@ -298,21 +369,23 @@ if __name__ == "__main__":
     from_addr = "0040b9d5731b44c460f535f099b11e15287411356493a3b403d7a430d8a933f8a9462c1d2791ce2ef9c4613022f8ab8189168a6f7be02aa9bc763322d4995cd357"
     to_addr = "00326950228e95f1c9f0af8802137db85a985a4ffbd6c8e4cce3fe67e31fd461861680a365653455546b57be380f9607edfe2376539d639fbf4803866e2dc5b332"
     key_file = "/home/cardano/viper-pool/relay-node/payment.skey"
+    genesis_json_file = "/home/cardano/viper-pool/relay-node/ff-genesis.json"
 
     # Create a ShelleyTools object
     shelley = ShelleyTools(path_to_cli, path_to_socket, working_dir, 
         network="--testnet-magic 42")
 
     # Run tests
-    print(shelley.cli)
-    print(shelley.load_protocol_parameters())
-    print(json.dumps(shelley.protocol_parameters, indent=4, sort_keys=True))
-    print(f"Tip = {shelley.get_tip()}")
-    print(shelley.make_address("test"))
-    print(json.dumps(shelley.get_utxos(from_addr), indent=4, sort_keys=True))
-    #shelley.send_payment(100, to_addr, from_addr, key_file, cleanup=True)
-    shelley.register_stake_address(
-        from_addr,
-        "/home/cardano/viper-pool/relay-node/stake.vkey", 
-        "/home/cardano/viper-pool/relay-node/stake.skey",
-        key_file)
+    # print(shelley.cli)
+    # print(shelley.load_protocol_parameters())
+    # print(json.dumps(shelley.protocol_parameters, indent=4, sort_keys=True))
+    # print(f"Tip = {shelley.get_tip()}")
+    # print(shelley.make_address("test"))
+    # print(json.dumps(shelley.get_utxos(from_addr), indent=4, sort_keys=True))
+    # #shelley.send_payment(100, to_addr, from_addr, key_file, cleanup=True)
+    # shelley.register_stake_address(
+    #     from_addr,
+    #     "/home/cardano/viper-pool/relay-node/stake.vkey", 
+    #     "/home/cardano/viper-pool/relay-node/stake.skey",
+    #     key_file)
+    shelley.create_block_producing_keys(genesis_json_file, "test_pool")
