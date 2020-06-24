@@ -24,8 +24,8 @@ class ShelleyTools():
         os.environ["CARDANO_NODE_SOCKET_PATH"] = self.socket
 
         # Set the working directory. Create the path if it doesn't exist.
-        self.working_dir = working_dir
-        Path(working_dir).mkdir(parents=True, exist_ok=True)
+        self.working_dir = Path(working_dir)
+        self.working_dir.mkdir(parents=True, exist_ok=True)
         
         self.ttl_buffer = ttl_buffer
         self.network = network
@@ -35,12 +35,12 @@ class ShelleyTools():
         """Load the protocol parameters which are needed for creating 
         transactions.
         """
-        params_file = self.working_dir + "protocol.json"
-        arg = (
+        params_file = self.working_dir / "protocol.json"
+        cmd = (
             f"{self.cli} shelley query protocol-parameters {self.network} "
             f"--out-file {params_file}"
         )
-        subprocess.run(arg.split())
+        subprocess.run(cmd.split())
         with open(params_file, 'r') as json_file:
             self.protocol_parameters = json.load(json_file)
         return params_file
@@ -48,8 +48,8 @@ class ShelleyTools():
     def get_tip(self):
         """Query the node for the current tip of the blockchain.
         """
-        arg = f"{self.cli} shelley query tip {self.network}"
-        result = subprocess.run(arg.split(), capture_output=True)
+        cmd = f"{self.cli} shelley query tip {self.network}"
+        result = subprocess.run(cmd.split(), capture_output=True)
         output = result.stdout.decode().strip()
         if "unSlotNo" not in output:
             raise ShelleyError(result.stderr.decode().strip())
@@ -71,29 +71,29 @@ class ShelleyTools():
         payment_addr = folder / (name + ".addr")
 
         # Generate payment key pair.
-        arg = (
+        cmd = (
             f"{self.cli} shelley address key-gen "
             f"--verification-key-file {payment_vkey} "
             f"--signing-key-file {payment_skey}"
         )
-        subprocess.run(arg.split())
+        subprocess.run(cmd.split())
 
         # Generate stake key pair.
-        arg = (
+        cmd = (
             f"{self.cli} shelley stake-address key-gen "
             f"--verification-key-file {stake_vkey} "
             f"--signing-key-file {stake_skey}"
         )
-        subprocess.run(arg.split())
+        subprocess.run(cmd.split())
 
         # Create the payment address.
-        arg = (
+        cmd = (
             f"{self.cli} shelley address build "
             f"--payment-verification-key-file {payment_vkey} "
             f"--stake-verification-key-file {stake_vkey} "
             f"--out-file {payment_addr} {self.network}"
         )
-        subprocess.run(arg.split())
+        subprocess.run(cmd.split())
         
         # Read the file and return the payment address.
         with open(payment_addr, 'r') as payment_addr_file:
@@ -104,8 +104,8 @@ class ShelleyTools():
         """Query the list of UTXOs for a given address and parse the output. 
         The returned data is formatted as a list of dict objects.
         """
-        arg = f"{self.cli} shelley query utxo --address {addr} {self.network}"
-        result = subprocess.run(arg.split(), capture_output=True)
+        cmd = f"{self.cli} shelley query utxo --address {addr} {self.network}"
+        result = subprocess.run(cmd.split(), capture_output=True)
         raw_utxos = result.stdout.decode().split('\n')[2:-1]
         utxos = []
         for utxo_line in raw_utxos:
@@ -155,40 +155,40 @@ class ShelleyTools():
 
         # Calculate the minimum fee
         params_file = self.load_protocol_parameters()
-        arg = (
+        cmd = (
             f"{self.cli} shelley transaction calculate-min-fee "
             f"--tx-in-count {tx_in_count} --tx-out-count 2 --ttl {ttl} "
             f"{self.network} --signing-key-file {key_file} "
             f"--protocol-params-file {params_file}"
         )
-        result = subprocess.run(arg.split(), capture_output=True)
+        result = subprocess.run(cmd.split(), capture_output=True)
         min_fee = int(result.stdout.decode().split()[1])
 
         # Build the transaction
         tx_raw_file = Path(self.working_dir) / (tx_name + ".raw")
-        arg = (
+        cmd = (
             f"{self.cli} shelley transaction build-raw{tx_in} "
             f"--tx-out {to_addr}+{payment} "
             f"--tx-out {from_addr}+{total_in - payment-min_fee} "
             f"--ttl {ttl} --fee {min_fee} --out-file {tx_raw_file}"
         )
-        subprocess.run(arg.split())
+        subprocess.run(cmd.split())
 
         # Sign the transaction with the signing key
         tx_signed_file = Path(self.working_dir) / (tx_name + ".signed")
-        arg = (
+        cmd = (
             f"{self.cli} shelley transaction sign "
             f"--tx-body-file {tx_raw_file} --signing-key-file {key_file} "
             f"{self.network} --out-file {tx_signed_file}"
         )
-        subprocess.run(arg.split())
+        subprocess.run(cmd.split())
 
         # Submit the transaction
-        arg = (
+        cmd = (
             f"{self.cli} shelley transaction submit "
             f"--tx-file {tx_signed_file} {self.network}"
         )
-        subprocess.run(arg.split())
+        subprocess.run(cmd.split())
 
         # Delete the transaction files if specified.
         if cleanup:
@@ -206,12 +206,12 @@ class ShelleyTools():
         # Create a registration certificate
         key_file_path = Path(stake_vkey_file)
         stake_cert_path = key_file_path.parent / (key_file_path.stem + ".cert")
-        arg = (
+        cmd = (
             f"{self.cli} shelley stake-address registration-certificate "
             f"--stake-verification-key-file {stake_vkey_file} "
             f"--out-file {stake_cert_path}"
         )
-        result = subprocess.run(arg.split(), stdout=subprocess.PIPE)
+        subprocess.run(cmd.split())
 
         # Determine the TTL
         tip = self.get_tip()
@@ -220,6 +220,9 @@ class ShelleyTools():
         # Get a list of UTXOs and sort them in decending order by value.
         utxos = self.get_utxos(addr)
         utxos.sort(key=lambda k: k["Lovelace"], reverse=True)
+
+        # Ensure the parameters file exists
+        params_file = self.load_protocol_parameters()
 
         # Iterate through the UTXOs until we have enough funds to cover the 
         # transaction. Also, create the tx_in string for the transaction.
@@ -230,8 +233,7 @@ class ShelleyTools():
             tx_in_str += f" --tx-in {utxo['TxHash']}#{utxo['TxIx']}"
 
             # Calculate the minimum fee
-            params_file = self.load_protocol_parameters()
-            arg = (
+            cmd = (
                 f"{self.cli} shelley transaction calculate-min-fee "
                 f"--tx-in-count {idx + 1} --tx-out-count 1 --ttl {ttl} "
                 f"{self.network} --signing-key-file {pmt_skey_file} "
@@ -239,7 +241,7 @@ class ShelleyTools():
                 f"--certificate-file {stake_cert_path} "
                 f"--protocol-params-file {params_file}"
             )
-            result = subprocess.run(arg.split(), capture_output=True)
+            result = subprocess.run(cmd.split(), capture_output=True)
             min_fee = int(result.stdout.decode().split()[1])
 
             # TX cost
@@ -258,30 +260,30 @@ class ShelleyTools():
         
         # Build the transaction.
         tx_raw_file = Path(self.working_dir) / (tx_name + ".raw")
-        arg = (
+        cmd = (
             f"{self.cli} shelley transaction build-raw{tx_in_str} "
             f"--tx-out {from_addr}+{utxo_total - cost} "
             f"--ttl {ttl} --fee {min_fee} --out-file {tx_raw_file} "
             f"--certificate-file {stake_cert_path}"
         )
-        subprocess.run(arg.split())
+        subprocess.run(cmd.split())
 
         # Sign the transaction with both the payment and stake keys.
         tx_signed_file = Path(self.working_dir) / (tx_name + ".signed")
-        arg = (
+        cmd = (
             f"{self.cli} shelley transaction sign "
             f"--tx-body-file {tx_raw_file} --signing-key-file {pmt_skey_file} "
             f"--signing-key-file {stake_skey_file} {self.network} "
             f"--out-file {tx_signed_file}"
         )
-        subprocess.run(arg.split())
+        subprocess.run(cmd.split())
 
         # Submit the transaction
-        arg = (
+        cmd = (
             f"{self.cli} shelley transaction submit "
             f"--tx-file {tx_signed_file} {self.network}"
         )
-        subprocess.run(arg.split())
+        subprocess.run(cmd.split())
 
         # Delete the transaction files if specified.
         if cleanup:
@@ -307,38 +309,38 @@ class ShelleyTools():
             folder = self.working_dir
         folder = Path(folder)
         folder.mkdir(parents=True, exist_ok=True)
-        
+
         # Generate Cold Keys and a Cold_counter
         cold_vkey = folder / (pool_name + "_cold.vkey")
         cold_skey = folder / (pool_name + "_cold.skey")
         cold_counter = folder / (pool_name + "_cold.counter")
-        arg = (
+        cmd = (
             f"{self.cli} shelley node key-gen "
             f"--cold-verification-key-file {cold_vkey} "
             f"--cold-signing-key-file {cold_skey} "
             f"--operational-certificate-issue-counter-file {cold_counter}"
         )
-        subprocess.run(arg.split())
+        subprocess.run(cmd.split())
 
         # Generate VRF Key pair
         vrf_vkey = folder / (pool_name + "_vrf.vkey")
         vrf_skey = folder / (pool_name + "_vrf.skey")
-        arg = (
+        cmd = (
             f"{self.cli} shelley node key-gen-VRF "
             f"--verification-key-file {vrf_vkey} "
             f"--signing-key-file {vrf_skey}"
         )
-        subprocess.run(arg.split())
+        subprocess.run(cmd.split())
 
         # Generate the KES Key pair
         kes_vkey = folder / (pool_name + "_kes.vkey")
         kes_skey = folder / (pool_name + "_kes.skey")
-        arg = (
+        cmd = (
             f"{self.cli} shelley node key-gen-KES "
             f"--verification-key-file {kes_vkey} "
             f"--signing-key-file {kes_skey}"
         )
-        subprocess.run(arg.split())
+        subprocess.run(cmd.split())
 
         # Get the network protocol parameters
         with open(genesis_file, "r") as genfile:
@@ -349,14 +351,132 @@ class ShelleyTools():
         slots_kes_period = genesis_parameters["slotsPerKESPeriod"]
         tip = self.get_tip()
         kes_period = tip // slots_kes_period  # Integer division
-        arg = (
+        cmd = (
             f"{self.cli} shelley node issue-op-cert "
             f"--kes-verification-key-file {kes_vkey} "
             f"--cold-signing-key-file {cold_skey} "
             f"--operational-certificate-issue-counter {cold_counter} "
             f"--kes-period {kes_period} --out-file {cert_file}"
         )
-        subprocess.run(arg.split())
+        subprocess.run(cmd.split())
+
+        # Get the pool ID and return it.
+        cmd = (
+            f"{self.cli} shelley stake-pool id "
+            f"--verification-key-file {cold_vkey}"
+        )
+        result = subprocess.run(cmd.split(), capture_output=True)
+        return result.stdout.decode()  # Return the pool id
+
+    def retire_stake_pool(self, remaining_epochs, genesis_file, cold_vkey, 
+        cold_skey, payment_skey, payment_addr):
+        """Retire a stake pool using the stake pool keys.
+
+        To retire the stake pool we need to:
+        - Create a deregistration certificate and
+        - Submit the certificate to the blockchain with a transaction
+
+        The deregistration certificate contains the epoch in which we want to 
+        retire the pool. This epoch must be after the current epoch and not 
+        later than eMax epochs in the future, where eMax is a protocol
+        parameter.
+        """
+
+        # Get the network parameters
+        params_file = self.load_protocol_parameters()
+        e_max = self.protocol_parameters["eMax"]
+
+        # Make sure the remaining epochs is a valid number.
+        if remaining_epochs < 1:
+            remaining_epochs = 1
+        elif remaining_epochs > e_max:
+            raise ShelleyError(
+                f"Invalid number of remaining epochs ({remaining_epochs}) "
+                f"prior to pool retirement. The maximum is {e_max}."
+            )
+
+        # Get the network genesis parameters
+        with open(genesis_file, "r") as genfile:
+            genesis_parameters = json.load(genfile)
+        epoch_length = genesis_parameters["epochLength"]
+
+        # Determine the TTL
+        tip = self.get_tip()
+        ttl = tip + self.ttl_buffer
+
+        # Get the current epoch
+        epoch = tip // epoch_length
+
+        # Create deregistration certificate
+        pool_dereg = self.working_dir / "pool.dereg"
+        cmd = (
+            f"{self.cli} shelley stake-pool deregistration-certificate "
+            f"--cold-verification-key-file {cold_vkey} "
+            f"--epoch {epoch + remaining_epochs} --out-file {pool_dereg}"
+        )
+        subprocess.run(cmd.split())
+
+        # Get a list of UTXOs and sort them in decending order by value.
+        utxos = self.get_utxos(payment_addr)
+        utxos.sort(key=lambda k: k["Lovelace"], reverse=True)
+
+        # Iterate through the UTXOs until we have enough funds to cover the 
+        # transaction. Also, create the tx_in string for the transaction.
+        utxo_total = 0
+        tx_in_str = ""
+        for idx, utxo in enumerate(utxos):
+            utxo_total += int(utxo['Lovelace'])
+            tx_in_str += f" --tx-in {utxo['TxHash']}#{utxo['TxIx']}"
+
+            # Calculate the minimum fee
+            cmd = (
+                f"{self.cli} shelley transaction calculate-min-fee "
+                f"--tx-in-count {idx + 1} --tx-out-count 1 --ttl {ttl} "
+                f"{self.network} --signing-key-file {payment_skey} "
+                f"--signing-key-file {payment_skey} "
+                f"--signing-key-file {cold_skey} "
+                f"--certificate {pool_dereg} "
+                f"--protocol-params-file {params_file}"
+            )
+            result = subprocess.run(cmd.split(), capture_output=True)
+            min_fee = int(result.stdout.decode().split()[1])
+            if utxo_total > min_fee:
+                break
+
+        if utxo_total < min_fee:
+            cost_ada = min_fee/1_000_000
+            utxo_total_ada = utxo_total/1_000_000
+            raise ShelleyError(
+                f"Transaction failed due to insufficient funds. "
+                f"Account {addr} cannot pay tranction costs of {cost} "
+                f"lovelaces because it only contains {utxo_total_ada} ADA."
+            )
+
+        # Build the raw transaction
+        tx_raw = self.working_dir / "pool_dereg_tx.raw"
+        cmd = (
+            f"{self.cli} shelley transaction build-raw{tx_in_str} "
+            f"--tx-out {payment_addr}+{utxo_total - min_fee} --ttl {ttl} "
+            f"--fee {min_fee} --out-file {tx_raw} "
+            f"--certificate-file {pool_dereg}"
+        )
+        subprocess.run(cmd.split())
+
+        # Sign it with both the payment signing key and the cold signing key.
+        tx_signed = self.working_dir / "pool_dereg_tx.signed"
+        cmd = (
+            f"{self.cli} shelley transaction sign --tx-body-file {tx_raw} "
+            f"--signing-key-file {payment_skey} --signing-key-file {cold_skey} "
+            f"{self.network} --out-file {tx_signed}"
+        )
+        subprocess.run(cmd.split())
+
+        # Submit the transaction
+        cmd = (
+            f"{self.cli} shelley transaction submit "
+            f"--tx-file {tx_signed} {self.network}"
+        )
+        subprocess.run(cmd.split())
 
 
 if __name__ == "__main__":
