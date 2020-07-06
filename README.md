@@ -5,7 +5,12 @@ IOHK.
 
 ## Installation
 
+You can install the Real Python Feed Reader from PyPI:
+
+pip install cardano-tools
+
+The package supports Python 3.7 and above.
+
 ## Examples
 
-## License
-
+See the example scripts for detailed usage examples.
