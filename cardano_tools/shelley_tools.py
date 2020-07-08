@@ -12,7 +12,7 @@ class ShelleyError(Exception):
 class ShelleyTools():
 
     def __init__(self, path_to_cli, path_to_socket, working_dir, 
-        ttl_buffer=1000, network="--mainnnet"):
+        ttl_buffer=1000, ssh=None, network="--mainnnet"):
 
         # Set the path to the CLI and verify it works. An exception will be 
         # thrown if the command is not found.
@@ -28,8 +28,28 @@ class ShelleyTools():
         self.working_dir.mkdir(parents=True, exist_ok=True)
         
         self.ttl_buffer = ttl_buffer
+        self.ssh = ssh
         self.network = network
         self.protocol_parameters = None
+
+    def __run(self, cmd):
+        if self.ssh:
+            
+            # Open the connection
+            self.ssh.open()
+
+            # Run the commands remotely
+            result = self.conn.run(cmd, warn=True, hide=True)
+
+            # Close the connection
+            self.ssh.close()
+
+        else:
+
+            # Execute the commands locally
+            result = subprocess.run(cmd.split(), capture_output=True)
+        
+        return result
 
     def load_protocol_parameters(self):
         """Load the protocol parameters which are needed for creating 
@@ -49,7 +69,9 @@ class ShelleyTools():
         """Query the node for the current tip of the blockchain.
         """
         cmd = f"{self.cli} shelley query tip {self.network}"
-        result = subprocess.run(cmd.split(), capture_output=True)
+        #result = subprocess.run(cmd.split(), capture_output=True)
+        #output = result.stdout.decode().strip()
+        result = self.__run(cmd)
         output = result.stdout.decode().strip()
         if "unSlotNo" not in output:
             raise ShelleyError(result.stderr.decode().strip())
@@ -114,7 +136,7 @@ class ShelleyTools():
         The returned data is formatted as a list of dict objects.
         """
         cmd = f"{self.cli} shelley query utxo --address {addr} {self.network}"
-        result = subprocess.run(cmd.split(), capture_output=True)
+        result = self.__run(cmd)
         raw_utxos = result.stdout.decode().split('\n')[2:-1]
         utxos = []
         for utxo_line in raw_utxos:
