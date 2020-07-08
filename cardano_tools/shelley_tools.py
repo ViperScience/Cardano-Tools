@@ -235,7 +235,7 @@ class ShelleyTools():
                 "it does not contain any ADA."
             )
         utxos.sort(key=lambda k: k["Lovelace"], reverse=True)
-
+        
         # Ensure the parameters file exists
         params_file = self.load_protocol_parameters()
 
@@ -272,17 +272,19 @@ class ShelleyTools():
                 f"Account {addr} cannot pay tranction costs of {cost} "
                 f"lovelaces because it only contains {utxo_total_ada} ADA."
             )
-        
+
         # Build the transaction.
         tx_raw_file = Path(self.working_dir) / (tx_name + ".raw")
         cmd = (
             f"{self.cli} shelley transaction build-raw{tx_in_str} "
             f"--tx-out {addr}+{utxo_total - cost} "
-            f"--ttl {ttl} --fee {min_fee} --out-file {tx_raw_file} "
-            f"--certificate-file {stake_cert_path}"
+            f"--ttl {ttl} --fee {min_fee} "
+            f"--certificate-file {stake_cert_path} "
+            f"--out-file {tx_raw_file}"
+            
         )
         subprocess.run(cmd.split())
-
+        
         # Sign the transaction with both the payment and stake keys.
         tx_signed_file = Path(self.working_dir) / (tx_name + ".signed")
         cmd = (
@@ -292,7 +294,7 @@ class ShelleyTools():
             f"--out-file {tx_signed_file}"
         )
         subprocess.run(cmd.split())
-
+        
         # Submit the transaction
         cmd = (
             f"{self.cli} shelley transaction submit "
@@ -386,11 +388,45 @@ class ShelleyTools():
             idfile.write(pool_id)
         return pool_id  # Return the pool id after first saving it to a file.
 
-    def register_stake_pool(self, pool_name, pool_metadata, folder=None, cleanup=True):
-    
-    #, cold_vkey, vrf_vkey, pool_pledge, pool_cost,
-    #    pool_margin_percent, stake_vkey, payment_skey, payment_addr):
-        """Register a stake pool.
+    def register_stake_pool(self, pool_name, pool_metadata, pool_pledge, 
+        pool_cost, pool_margin, pool_cold_vkey, pool_cold_skey, pool_vrf_key, 
+        pool_reward_vkey, owner_stake_vkeys, owner_stake_skeys, payment_addr, 
+        payment_skey, genesis_file, folder=None, cleanup=True):
+        """Register a stake pool on the blockchain.
+
+        Parameters
+        ----------
+        pool_name : str
+            Pool name for file/certificate naming.
+        pool_metadata : dict
+            Dictionary of stake pool metadata to be converted to json.
+        pool_pledge : int
+            Pool pledge amount in lovelace.
+        pool_cost : int
+            Pool cost (fixed fee per epoch) in lovelace.
+        pool_margin : float
+            Pool margin (variable fee) as a percentage.
+        pool_cold_vkey : str, Path
+            Path to the pool's cold verification key.
+        pool_cold_skey : str, Path
+        pool_vrf_key : str, Path
+            Path to the pool's verification key.
+        pool_reward_vkey : str, Path
+            Path to the staking verification key that will receive pool rewards.
+        owner_stake_vkeys : list
+            List of owner stake keys (paths) responsible for the pledge.
+        owner_stake_skeys : list
+        payment_addr : 
+        payment_skey : 
+        folder : str, Path, optional
+            The directory where the generated files/certs will be placed.
+        cleanup : bool, optional
+            A flag used to cleanup the transaction files (default is True)
+
+        Returns
+        -------
+        list
+            a list of strings representing the header columns
         """
 
         if folder is None:
@@ -409,100 +445,123 @@ class ShelleyTools():
         result = subprocess.run(cmd.split(), capture_output=True)
         metadata_hash = result.stdout.decode().strip()
         
-        # # Generate Stake pool registration certificate
-        # key_path = Path(cold_vkey)
-        # pool_cert_path = key_path.parent / (key_path.stem + "_pool.cert")
-        # cmd = (
-        #     f"{self.cli} shelley stake-pool registration-certificate "
-        #     f"--cold-verification-key-file {cold_vkey} "
-        #     f"--vrf-verification-key-file {vrf_vkey} "
-        #     f"--pool-pledge {pool_pledge*1_000_000} "
-        #     f"--pool-cost {pool_cost*1_000_000} "
-        #     f"--pool-margin {pool_margin_percent/100} "
-        #     f"--pool-reward-account-verification-key-file {stake_vkey} "
-        #     f"--pool-owner-stake-verification-key-file {stake_vkey} "
-        #     f"{self.network} --out-file {pool_cert}"
-        # )
-        # subprocess.run(cmd.split())
+        # Generate Stake pool registration certificate
+        pool_cert_path = folder / (pool_name + "_registration.cert")
+        owner_key_str = ""
+        for key_path in owner_stake_vkeys:
+            owner_key_str += f"--pool-owner-stake-verification-key-file {key_path} "
+        cmd = (
+            f"{self.cli} shelley stake-pool registration-certificate "
+            f"--cold-verification-key-file {pool_cold_vkey} "
+            f"--vrf-verification-key-file {pool_vrf_key} "
+            f"--pool-pledge {pool_pledge} "
+            f"--pool-cost {pool_cost} "
+            f"--pool-margin {pool_margin/100} "
+            f"--pool-reward-account-verification-key-file {pool_reward_vkey} "
+            f"{owner_key_str} {self.network} --out-file {pool_cert_path}"
+        )
+        subprocess.run(cmd.split())
 
-        # # Edit the cert free text
-        # # ...
+        # TODO: Edit the cert free text
 
-        # # Generate delegation certificate (pledge)
-        # del_cert_path = key_path.parent / (key_path.stem + "_delegation.cert")
-        # cmd = (
-        #     f"{self.cli} shelley stake-pool delegation-certificate "
-        #     f"--stake-verification-key-file {stake_vkey} "
-        #     f"--cold-verification-key-file {cold_vkey} "
-        #     f"--out-file {del_cert_path}"
-        # )
-        # subprocess.run(cmd.split())
+        # Generate delegation certificate (pledge from each owner)
+        del_cert_args = ""
+        signing_key_args = ""
+        for key_path in owner_stake_vkeys:
+            key_path = Path(key_path)
+            cert_path = key_path.parent / (key_path.stem + "_delegation.cert")
+            del_cert_args += f"--certificate-file {cert_path} "
+            cmd = (
+                f"{self.cli} shelley stake-address delegation-certificate "
+                f"--stake-verification-key-file {key_path} "
+                f"--cold-verification-key-file {pool_cold_vkey} "
+                f"--out-file {cert_path}"
+            ) 
+            subprocess.run(cmd.split())
+        for key_path in owner_stake_skeys:
+            signing_key_args += f"--signing-key-file {key_path} "
 
-        # # Determine the TTL
-        # tip = self.get_tip()
-        # ttl = tip + self.ttl_buffer
+        # Get the pool deposit from the network genesis parameters.
+        with open(genesis_file, "r") as genfile:
+            genesis_parameters = json.load(genfile)
+        pool_deposit = genesis_parameters["protocolParams"]["poolDeposit"]
 
-        # # Submit the pool certificate and delegation certificate to the 
-        # # blockchain.
-        # params_file = self.load_protocol_parameters()
-        # cmd = (
-        #     f"{self.cli} shelley transaction calculate-min-fee "
-        #     f"--tx-in-count 1 --tx-out-count 1 --ttl {ttl} {self.network} "
-        #     f"--signing-key-file {payment_skey} "
-        #     f"--signing-key-file stake.skey "
-        #     f"--signing-key-file cold.skey "
-        #     f"--certificate-file pool.cert "
-        #     f"--certificate-file delegation.cert "
-        #     f"--protocol-params-file {params_file}"
-        # )
-        # # subprocess.run(cmd.split())
+        # Get a list of UTXOs and sort them in decending order by value.
+        utxos = self.get_utxos(payment_addr)
+        utxos.sort(key=lambda k: k["Lovelace"], reverse=True)
 
-        # # Get the network genesis parameters
-        # with open(genesis_file, "r") as genfile:
-        #     genesis_parameters = json.load(genfile)
+        # Determine the TTL
+        tip = self.get_tip()
+        ttl = tip + self.ttl_buffer
 
-        # # Pool deposit
-        # pool_deposit = genesis_parameters["poolDeposit"]
-
-        # # Get a list of UTXOs and sort them in decending order by value.
-        # utxos = self.get_utxos(payment_addr)
-        # utxos.sort(key=lambda k: k["Lovelace"], reverse=True)
+        # Ensure the parameters file exists
+        params_file = self.load_protocol_parameters()
         
-        # # Iterate through the UTXOs until we have enough funds to cover the 
-        # # transaction. Also, create the tx_in string for the transaction.
-        # utxo_total = 0
-        # tx_in_str = ""
-        # for idx, utxo in enumerate(utxos):
-        #     utxo_total += int(utxo['Lovelace'])
-        #     tx_in_str += f" --tx-in {utxo['TxHash']}#{utxo['TxIx']}"
+        # Iterate through the UTXOs until we have enough funds to cover the 
+        # transaction. Also, create the tx_in string for the transaction.
+        utxo_total = 0
+        min_fee = 1  # make this start greater than utxo_total
+        tx_in_str = ""
+        for idx, utxo in enumerate(utxos):
+            utxo_total += int(utxo['Lovelace'])
+            tx_in_str += f" --tx-in {utxo['TxHash']}#{utxo['TxIx']}"
 
-        #     # Calculate the minimum fee
-        #     cmd = (
-        #         f"{self.cli} shelley transaction calculate-min-fee "
-        #         f"--tx-in-count {idx + 1} --tx-out-count 1 --ttl {ttl} "
-        #         f"{self.network} --signing-key-file {payment_skey} "
-        #         f"--signing-key-file {payment_skey} "
-        #         f"--signing-key-file {cold_skey} "
-        #         f"--certificate {pool_dereg} "
-        #         f"--protocol-params-file {params_file}"
-        #     )
-        #     result = subprocess.run(cmd.split(), capture_output=True)
-        #     min_fee = int(result.stdout.decode().split()[1])
-        #     if utxo_total > min_fee:
-        #         break
+            # Calculate the minimum fee
+            cmd = (
+                f"{self.cli} shelley transaction calculate-min-fee "
+                f"--tx-in-count {idx + 1} --tx-out-count 1 --ttl {ttl} "
+                f"{self.network} --signing-key-file {payment_skey} "
+                f"{signing_key_args} --signing-key-file {pool_cold_skey} "
+                f"--certificate-file {pool_cert_path} {del_cert_args}"
+                f"--protocol-params-file {params_file}"
+            )
+            result = subprocess.run(cmd.split(), capture_output=True)
+            min_fee = int(result.stdout.decode().split()[1])
+            if utxo_total > (min_fee + pool_deposit):
+                break
 
-        # if utxo_total < min_fee:
-        #     cost_ada = min_fee/1_000_000
-        #     utxo_total_ada = utxo_total/1_000_000
-        #     raise ShelleyError(
-        #         f"Transaction failed due to insufficient funds. "
-        #         f"Account {addr} cannot pay tranction costs of {cost} "
-        #         f"lovelaces because it only contains {utxo_total_ada} ADA."
-        #     )
+        if utxo_total < min_fee:
+            cost_ada = (min_fee + pool_deposit)/1_000_000
+            utxo_total_ada = utxo_total/1_000_000
+            raise ShelleyError(
+                f"Transaction failed due to insufficient funds. "
+                f"Account {payment_addr} cannot pay tranction costs of {cost_ada} "
+                f"lovelaces because it only contains {utxo_total_ada} ADA."
+            )
+        
+        # Build the transaction to submit the pool certificate and delegation 
+        # certificate(s) to the blockchain.
+        tx_name = datetime.now().strftime("reg_stake_key_%Y-%m-%d_%Hh%Mm%Ss")
+        tx_raw_file = Path(self.working_dir) / (tx_name + ".raw")
+        cmd = (
+            f"{self.cli} shelley transaction build-raw{tx_in_str} "
+            f"--tx-out {payment_addr}+{utxo_total - min_fee - pool_deposit} "
+            f"--ttl {ttl} --fee {min_fee} --out-file {tx_raw_file} "
+            f"--certificate-file {pool_cert_path} {del_cert_args}"
+        )
+        subprocess.run(cmd.split())
+
+        # Sign the transaction with both the payment and stake keys.
+        tx_signed_file = Path(self.working_dir) / (tx_name + ".signed")
+        cmd = (
+            f"{self.cli} shelley transaction sign "
+            f"--tx-body-file {tx_raw_file} --signing-key-file {payment_skey} "
+            f"{signing_key_args} --signing-key-file {pool_cold_skey} "
+            f"{self.network} --out-file {tx_signed_file}"
+        )
+        subprocess.run(cmd.split())
+
+        # Submit the transaction
+        cmd = (
+            f"{self.cli} shelley transaction submit "
+            f"--tx-file {tx_signed_file} {self.network}"
+        )
+        subprocess.run(cmd.split())
 
         # Delete the transaction files if specified.
         if cleanup:
-            pass
+            os.remove(tx_raw_file)
+            os.remove(tx_signed_file)
 
     def retire_stake_pool(self, remaining_epochs, genesis_file, cold_vkey, 
         cold_skey, payment_skey, payment_addr):
