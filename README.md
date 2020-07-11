@@ -40,7 +40,7 @@ For more detailed examples, see the [example scripts](https://gitlab.com/viper-s
 
 ### Shelley Tools
 
-The `ShellyTools` class provides an interface to the `cardano-cli shelley` 
+The `ShelleyTools` class provides an interface to the `cardano-cli shelley` 
 commands. An example for creating a wallet is given below.
 
 ```python
