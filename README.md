@@ -66,6 +66,9 @@ print(shelley.make_address("my_wallet"))
 Optionally, an [SSH connection object](https://docs.fabfile.org/en/2.5/api/connection.html) may be specified if working with remote hosts.
 
 ```python
+from cardano_tools import ShelleyTools
+from fabric import Connection
+
 conn = Connection(
     host="hostname",
     user="admin",
