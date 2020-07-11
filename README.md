@@ -1,5 +1,28 @@
 # Cardano Tools
-A python module for interfacing with the Cardano blockchain.
+A python module for interacting with the [Cardano](https://www.cardano.org/) 
+blockchain.
+
+The `Cardano-Tools` module provides functionality for interfacing with running
+full nodes on local or remote hosts. A running Cardano node is a prerequisite
+for using this package. 
+
+Provided tools include:
+* Interfacing with the node:
+  * Starting a relay or pool node locally and remotely.
+  * Getting the node tip. 
+* Creating and administrating a wallet:
+  * Create a new wallet address
+  * Get UTXO list
+  * Send a payment
+  * Register a staking address
+  * Get the blockchain tip
+* Creating and administrating a stake pool:
+  * Create block producing keys
+  * Register a stake pool
+  * Retire a stake pool
+
+This project is developed and maintained by the team at 
+[Viper Staking](https://viperscience.com/adapool#portfolio).
 
 ## Installation
 
@@ -17,8 +40,8 @@ For more detailed examples, see the [example scripts](https://gitlab.com/viper-s
 
 ### Shelley Tools
 
-The `ShellyTools` object provides an interface to the `cardano-cli shelley` 
-commands. An example for querying the node tip is given below.
+The `ShellyTools` class provides an interface to the `cardano-cli shelley` 
+commands. An example for creating a wallet is given below.
 
 ```python
 from cardano_tools import ShelleyTools
@@ -36,11 +59,11 @@ shelley = ShelleyTools(
     network="--testnet-magic 42"  # <-- For the testnet (default: --mainnet)
 )
 
-# Get the tip
-print(f"Tip = {shelley.get_tip()}")
+# Create a wallet address with both spending and staking keys.
+print(shelley.make_address("my_wallet"))
 ```
 
-Optionally, an SSH [connection object](https://docs.fabfile.org/en/2.5/api/connection.html) may be specified if working with remote hosts.
+Optionally, an [SSH connection object](https://docs.fabfile.org/en/2.5/api/connection.html) may be specified if working with remote hosts.
 
 ```python
 conn = Connection(
