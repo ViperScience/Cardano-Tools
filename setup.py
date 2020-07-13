@@ -26,6 +26,6 @@ setup(
     ],
     packages=["cardano_tools"],
     include_package_data=True,
-    install_requires=["fabric"],
+    install_requires=["fabric", "requests"],
     entry_points={},
 )
