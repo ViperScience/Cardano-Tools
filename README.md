@@ -69,6 +69,12 @@ Optionally, an [SSH connection object](https://docs.fabfile.org/en/2.5/api/conne
 from cardano_tools import ShelleyTools
 from fabric import Connection
 
+# Test Inputs (example paths)
+path_to_cli = "/home/user/.cabal/bin/cardano-cli"
+path_to_socket = "/home/user/relay-node/db/node.socket"
+working_dir = "/home/user/.cardano-tools/"
+
+# SSH connection to remote host
 conn = Connection(
     host="hostname",
     user="admin",

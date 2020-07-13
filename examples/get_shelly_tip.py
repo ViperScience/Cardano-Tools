@@ -8,8 +8,12 @@ path_to_socket = "/home/cardano/relay-node/db/node.socket"
 working_dir = "/home/cardano/.cardano-tools/"
 
 # Create a ShelleyTools object
-shelley = ShelleyTools(path_to_cli, path_to_socket, working_dir, 
-    network="--testnet-magic 42")
+shelley = ShelleyTools(
+    path_to_cli, 
+    path_to_socket,
+    working_dir, 
+    network="--testnet-magic 42"
+)
 
 # Run tests
 print(shelley.cli)
