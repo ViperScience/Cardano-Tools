@@ -91,4 +91,17 @@ shelley = ShelleyTools(
 )
 ```
 
+## Support
 
+Join our [telegram channel](https://t.me/ViperTools) to get support and discuss
+potential upgrades or changes.
+
+If you find our tools useful, please consider buying us a beer!
+
+```
+# ADA
+DdzFFzCqrhstZCw5CwyKLaDvna3Myfioi1LL4up4D5nn5q4QyyhEw5nLNs5g46sTaCarHJKtLwviL1s5Ed6mdRUhX2vBc6A8queoJMpF
+
+# BTC
+<TBA>
+```
