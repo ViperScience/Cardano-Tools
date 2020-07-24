@@ -212,8 +212,52 @@ class ShelleyTools():
             })
         return utxos
 
+    def calc_min_fee(self, tx_draft, tx_in_count, tx_out_count, witness_count,
+                     byron_witness_count=0) -> int:
+        """Calculate the minimum fee in lovelaces for the transaction.
+
+        Parameters
+        ----------
+        tx_draft : str, Path
+            Path to draft transaction file.
+        tx_in_count : int
+            The number of UTXOs being spent.
+        tx_out_count : int
+            The number of output UTXOs.
+        witness_count : int
+            The number of transaction signing keys.
+        byron_witness_count : int, optional
+            Number of Byron witnesses (defaults to 0).
+        """
+        params_file = self.load_protocol_parameters()
+        result = self.__run(
+            f"{self.cli} shelley transaction calculate-min-fee "
+            f"--tx-body-file {tx_draft} "
+            f"--tx-in-count {tx_in_count} "
+            f"--tx-out-count {tx_out_count} "
+            f"--witness-count {witness_count} "
+            f"--byron-witness-count {byron_witness_count} "
+            f"{self.network} --protocol-params-file {params_file}"
+        )
+        min_fee = int(result.stdout.split()[0])
+        return min_fee
+
     def send_payment(self, amt, to_addr, from_addr, key_file, cleanup=True):
-        """Send a simple payment of ADA.
+        """Send ADA from one address to another.
+
+        Parameters
+        ----------
+        amt : float
+            Amount of ADA to send (before fee).
+        to_addr : str
+            Address to send the ADA to.
+        from_addr : str
+            Address to send the ADA from.
+        key_file : str, Path
+            Path to the send address signing key file.
+        cleanup : bool, optional
+            Flag that indicates if the temporary transaction files should be
+            removed when finished (defaults to True).
         """
         payment = amt*1_000_000  # ADA to Lovelaces
 
@@ -224,21 +268,39 @@ class ShelleyTools():
         utxos = self.get_utxos(from_addr)
         utxos.sort(key=lambda k: k["Lovelace"], reverse=True)
 
-        # Determine which UTXO(s) to spend.
-        tx_in = ""
-        total_in = 0
-        tx_in_count = 0
-        for u in utxos:
-            tx_in += f" --tx-in {u['TxHash']}#{u['TxIx']}"
-            total_in += int(u['Lovelace'])
-            tx_in_count += 1
-            if total_in > payment:
+        # Iterate through the UTXOs until we have enough funds to cover the
+        # transaction. Also, create the tx_in string for the transaction.
+        tx_draft_file = Path(self.working_dir) / (tx_name + ".draft")
+        utxo_total = 0
+        tx_in_str = ""
+        for count, utxo in enumerate(utxos):
+
+            utxo_count = count + 1
+            utxo_total += int(utxo['Lovelace'])
+            tx_in_str += f" --tx-in {utxo['TxHash']}#{utxo['TxIx']}"
+            if utxo_total < payment:
+                continue
+
+            # Build a transaction draft
+            self.__run(
+                f"{self.cli} shelley transaction build-raw{tx_in_str} "
+                f"--tx-out {to_addr}+0 --tx-out {from_addr}+0 "
+                f"--ttl 0 --fee 0 --out-file {tx_draft_file}"
+            )
+
+            # Calculate the minimum fee
+            min_fee = self.calc_min_fee(tx_draft_file, utxo_count, 2, 1)
+
+            if utxo_total > (payment + min_fee):
                 break
-        if total_in < payment:
+
+        total_lovelace_out = (payment + min_fee)
+        if utxo_total < total_lovelace_out:
             raise ShelleyError(
                 f"Transaction failed due to insufficient funds. "
-                f"Account {from_addr} cannot send {amt} ADA to account "
-                f"{to_addr} because it only contains {total_in/1_000_000} ADA."
+                f"Account {from_addr} cannot send {amt} ADA plus fees to "
+                f"account {to_addr} because it only contains "
+                f"{total_in/1_000_000.} ADA."
             )
             # Maybe this should fail more gracefully, but higher level logic
             # can also just catch the error and handle it.
@@ -248,22 +310,12 @@ class ShelleyTools():
         tip = self.get_tip()
         ttl = tip + self.ttl_buffer
 
-        # Calculate the minimum fee
-        params_file = self.load_protocol_parameters()
-        result = self.__run(
-            f"{self.cli} shelley transaction calculate-min-fee "
-            f"--tx-in-count {tx_in_count} --tx-out-count 2 --ttl {ttl} "
-            f"{self.network} --signing-key-file {key_file} "
-            f"--protocol-params-file {params_file}"
-        )
-        min_fee = int(result.stdout.split()[1])
-
         # Build the transaction
         tx_raw_file = Path(self.working_dir) / (tx_name + ".raw")
         self.__run(
             f"{self.cli} shelley transaction build-raw{tx_in} "
             f"--tx-out {to_addr}+{payment} "
-            f"--tx-out {from_addr}+{total_in - payment-min_fee} "
+            f"--tx-out {from_addr}+{utxo_total - total_lovelace_out} "
             f"--ttl {ttl} --fee {min_fee} --out-file {tx_raw_file}"
         )
 
@@ -283,6 +335,7 @@ class ShelleyTools():
 
         # Delete the transaction files if specified.
         if cleanup:
+            self.__cleanup_file(tx_draft_file)
             self.__cleanup_file(tx_raw_file)
             self.__cleanup_file(tx_signed_file)
 
