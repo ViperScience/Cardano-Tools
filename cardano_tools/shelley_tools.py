@@ -16,6 +16,9 @@ class ShelleyTools():
     def __init__(self, path_to_cli, path_to_socket, working_dir,
                  ttl_buffer=1000, ssh=None, network="--mainnnet"):
 
+        # Debug flag -- may be set after object initialization.
+        self.debug = False
+
         # If the host is remote a Connection object (fabric) is supplied.
         # Set this first because its used during setup.
         self.ssh = ssh
@@ -43,17 +46,21 @@ class ShelleyTools():
     def __run(self, cmd):
         if self.ssh is not None:
 
-            # Open the connection
-            self.ssh.open()
+            self.ssh.open()  # Open the connection
 
             # Run the commands remotely
             cmd = f"export CARDANO_NODE_SOCKET_PATH={self.socket}; " + cmd
-            result = self.ssh.run(cmd, warn=True, hide=True)
+            if self.debug
+                print(f"CMD: \"{cmd}\"")
+                result = self.ssh.run(cmd, warn=True)
+                print(f"stdout: \"{result.stdout}\"")
+                print(f"stdout: \"{result.stderr}\"")
+            else:
+                result = self.ssh.run(cmd, warn=True, hide=True)
             stdout = result.stdout.strip()
             stderr = result.stderr.strip()
 
-            # Close the connection
-            self.ssh.close()
+            self.ssh.close()  # Close the connection
 
         else:
 
@@ -62,6 +69,10 @@ class ShelleyTools():
             result = subprocess.run(cmd.split(), capture_output=True)
             stdout = result.stdout.decode().strip()
             stderr = result.stderr.decode().strip()
+            if self.debug:
+                print(f"CMD: \"{cmd}\"")
+                print(f"stdout: \"{stdout}\"")
+                print(f"stdout: \"{stderr}\"")
 
         ResultType = namedtuple("Result", "stdout, stderr")
         return ResultType(stdout, stderr)
