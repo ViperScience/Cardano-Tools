@@ -904,17 +904,6 @@ class ShelleyTools():
             min_fee = self.calc_min_fee(tx_draft_file, utxo_count,
                                         tx_out_count=1, witness_count=2)
 
-            # Calculate the minimum fee
-            result = self.__run(
-                f"{self.cli} shelley transaction calculate-min-fee "
-                f"--tx-in-count {idx + 1} --tx-out-count 1 --ttl {ttl} "
-                f"{self.network} --signing-key-file {payment_skey} "
-                f"--signing-key-file {payment_skey} "
-                f"--signing-key-file {cold_skey} "
-                f"--certificate {pool_dereg} "
-                f"--protocol-params-file {params_file}"
-            )
-            min_fee = int(result.stdout.split()[1])
             if utxo_total > min_fee:
                 break
 
