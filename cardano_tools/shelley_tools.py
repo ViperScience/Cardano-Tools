@@ -397,7 +397,7 @@ class ShelleyTools():
         utxos.sort(key=lambda k: k["Lovelace"], reverse=True)
 
         # Ensure the parameters file exists
-        params_file = self.load_protocol_parameters()
+        self.load_protocol_parameters()
 
         # Iterate through the UTXOs until we have enough funds to cover the
         # transaction. Also, create the tx_in string for the transaction.
@@ -418,8 +418,8 @@ class ShelleyTools():
             )
 
             # Calculate the minimum fee
-            min_fee = self.calc_min_fee(tx_draft_file, utxo_count, 
-                tx_out_count=1, witness_count=2)
+            min_fee = self.calc_min_fee(tx_draft_file, utxo_count,
+                                        tx_out_count=1, witness_count=2)
 
             # TX cost
             cost = min_fee + self.protocol_parameters["keyDeposit"]
@@ -743,10 +743,11 @@ class ShelleyTools():
         ttl = tip + self.ttl_buffer
 
         # Ensure the parameters file exists
-        params_file = self.load_protocol_parameters()
+        self.load_protocol_parameters()
 
         # Iterate through the UTXOs until we have enough funds to cover the
         # transaction. Also, create the tx_in string for the transaction.
+        tx_name = datetime.now().strftime("reg_stake_key_%Y-%m-%d_%Hh%Mm%Ss")
         tx_draft_file = Path(self.working_dir) / (tx_name + ".draft")
         utxo_total = 0
         min_fee = 1  # make this start greater than utxo_total
@@ -765,8 +766,9 @@ class ShelleyTools():
             )
 
             # Calculate the minimum fee
-            min_fee = self.calc_min_fee(tx_draft_file, utxo_count, 
-                tx_out_count=1, witness_count=(len(signing_key_args) + 2))
+            nwit = len(signing_key_args) + 2
+            min_fee = self.calc_min_fee(tx_draft_file, utxo_count,
+                                        tx_out_count=1, witness_count=nwit)
 
             if utxo_total > (min_fee + pool_deposit):
                 break
@@ -782,7 +784,6 @@ class ShelleyTools():
 
         # Build the transaction to submit the pool certificate and delegation
         # certificate(s) to the blockchain.
-        tx_name = datetime.now().strftime("reg_stake_key_%Y-%m-%d_%Hh%Mm%Ss")
         tx_raw_file = Path(self.working_dir) / (tx_name + ".raw")
         self.__run(
             f"{self.cli} shelley transaction build-raw{tx_in_str} "
@@ -842,7 +843,7 @@ class ShelleyTools():
         cleanup : bool, optional
             Flag that indicates if the temporary transaction files should be
             removed when finished (defaults to True).
-        """ 
+        """
 
         # Get the network parameters
         params_file = self.load_protocol_parameters()
@@ -883,7 +884,7 @@ class ShelleyTools():
 
         # Iterate through the UTXOs until we have enough funds to cover the
         # transaction. Also, create the tx_in string for the transaction.
-        tx_draft_file = Path(self.working_dir) / (tx_name + ".draft")
+        tx_draft_file = self.working_dir / "pool_dereg_tx.draft"
         utxo_total = 0
         tx_in_str = ""
         for idx, utxo in enumerate(utxos):
@@ -899,8 +900,8 @@ class ShelleyTools():
             )
 
             # Calculate the minimum fee
-            min_fee = self.calc_min_fee(tx_draft_file, utxo_count, 
-                tx_out_count=1, witness_count=2)
+            min_fee = self.calc_min_fee(tx_draft_file, utxo_count,
+                                        tx_out_count=1, witness_count=2)
 
             # Calculate the minimum fee
             result = self.__run(
@@ -937,15 +938,17 @@ class ShelleyTools():
         # Sign it with both the payment signing key and the cold signing key.
         tx_signed_file = self.working_dir / "pool_dereg_tx.signed"
         self.__run(
-            f"{self.cli} shelley transaction sign --tx-body-file {tx_raw} "
-            f"--signing-key-file {payment_skey} --signing-key-file {cold_skey}"
-            f" {self.network} --out-file {tx_signed_file}"
+            f"{self.cli} shelley transaction sign "
+            f"--tx-body-file {tx_raw_file} "
+            f"--signing-key-file {payment_skey} "
+            f"--signing-key-file {cold_skey} "
+            f"{self.network} --out-file {tx_signed_file}"
         )
 
         # Submit the transaction
         self.__run(
             f"{self.cli} shelley transaction submit "
-            f"--tx-file {tx_signed} {self.network}"
+            f"--tx-file {tx_signed_file} {self.network}"
         )
 
         # Delete the transaction files if specified.
