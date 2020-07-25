@@ -50,7 +50,7 @@ class ShelleyTools():
 
             # Run the commands remotely
             cmd = f"export CARDANO_NODE_SOCKET_PATH={self.socket}; " + cmd
-            if self.debug
+            if self.debug:
                 print(f"CMD: \"{cmd}\"")
                 result = self.ssh.run(cmd, warn=True)
                 print(f"stdout: \"{result.stdout}\"")
