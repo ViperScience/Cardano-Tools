@@ -324,7 +324,7 @@ class ShelleyTools():
         # Build the transaction
         tx_raw_file = Path(self.working_dir) / (tx_name + ".raw")
         self.__run(
-            f"{self.cli} shelley transaction build-raw{tx_in} "
+            f"{self.cli} shelley transaction build-raw{tx_in_str} "
             f"--tx-out {to_addr}+{payment} "
             f"--tx-out {from_addr}+{utxo_total - total_lovelace_out} "
             f"--ttl {ttl} --fee {min_fee} --out-file {tx_raw_file}"
