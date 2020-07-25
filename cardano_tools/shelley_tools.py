@@ -301,7 +301,7 @@ class ShelleyTools():
 
             # Calculate the minimum fee
             min_fee = self.calc_min_fee(tx_draft_file, utxo_count,
-                tx_out_count=2, witness_count=1)
+                                        tx_out_count=2, witness_count=1)
 
             if utxo_total > (payment + min_fee):
                 break
@@ -312,7 +312,7 @@ class ShelleyTools():
                 f"Transaction failed due to insufficient funds. "
                 f"Account {from_addr} cannot send {amt} ADA plus fees to "
                 f"account {to_addr} because it only contains "
-                f"{total_in/1_000_000.} ADA."
+                f"{utxo_total/1_000_000.} ADA."
             )
             # Maybe this should fail more gracefully, but higher level logic
             # can also just catch the error and handle it.
@@ -599,13 +599,13 @@ class ShelleyTools():
             Pool cost (fixed fee per epoch) in lovelace.
         pool_margin : float
             Pool margin (variable fee) as a percentage.
-        pool_cold_vkey : str, Path
+        pool_cold_vkey : str or Path
             Path to the pool's cold verification key.
-        pool_cold_skey : str, Path
+        pool_cold_skey : str or Path
             Path to the pool's cold signing key.
-        pool_vrf_key : str, Path
+        pool_vrf_key : str or Path
             Path to the pool's verification key.
-        pool_reward_vkey : str, Path
+        pool_reward_vkey : str or Path
             Path to the staking verification key that will receive pool
             rewards.
         owner_stake_vkeys : list
@@ -617,10 +617,10 @@ class ShelleyTools():
         payment_addr : str
             Address responsible for paying the pool registration and
             transaction fees.
-        payment_skey : str, Path
+        payment_skey : str or Path
             Signing key for the address responsible for paying the pool
             registration and transaction fees.
-        genesis_file : str, Path
+        genesis_file : str or Path
             Path to the genesis file.
         pool_relays: list, optional,
             List of dictionaries each representing a pool relay. The
@@ -637,7 +637,8 @@ class ShelleyTools():
         folder : str, Path, optional
             The directory where the generated files/certs will be placed.
         cleanup : bool, optional
-            A flag used to cleanup the transaction files (default is True)
+            Flag that indicates if the temporary transaction files should be
+            removed when finished (defaults to True).
         """
 
         # Get a working directory to store the generated files and make sure
@@ -812,18 +813,36 @@ class ShelleyTools():
             self.__cleanup_file(tx_signed_file)
 
     def retire_stake_pool(self, remaining_epochs, genesis_file, cold_vkey,
-                          cold_skey, payment_skey, payment_addr):
+                          cold_skey, payment_skey, payment_addr, cleanup=True):
         """Retire a stake pool using the stake pool keys.
 
         To retire the stake pool we need to:
         - Create a deregistration certificate and
-        - Submit the certificate to the blockchain with a transaction
+        - Submit the certificate to the blockchain with a transaction.
 
         The deregistration certificate contains the epoch in which we want to
         retire the pool. This epoch must be after the current epoch and not
         later than eMax epochs in the future, where eMax is a protocol
         parameter.
-        """
+
+        Parameters
+        ----------
+        remaining_epochs : int
+            Epochs remaining before pool should be deregistered.
+        genesis_file : str or Path
+            Path to the genesis file.
+        cold_vkey : str or Path
+            Path to the pool's cold verification key.
+        cold_skey : str or Path
+            Path to the pool's cold signing key.
+        payment_skey : str or Path
+            Path to the payment signing key.
+        payment_addr : str
+            Address of the payment key.
+        cleanup : bool, optional
+            Flag that indicates if the temporary transaction files should be
+            removed when finished (defaults to True).
+        """ 
 
         # Get the network parameters
         params_file = self.load_protocol_parameters()
@@ -864,11 +883,24 @@ class ShelleyTools():
 
         # Iterate through the UTXOs until we have enough funds to cover the
         # transaction. Also, create the tx_in string for the transaction.
+        tx_draft_file = Path(self.working_dir) / (tx_name + ".draft")
         utxo_total = 0
         tx_in_str = ""
         for idx, utxo in enumerate(utxos):
+            utxo_count = idx + 1
             utxo_total += int(utxo['Lovelace'])
             tx_in_str += f" --tx-in {utxo['TxHash']}#{utxo['TxIx']}"
+
+            # Build a transaction draft
+            self.__run(
+                f"{self.cli} shelley transaction build-raw{tx_in_str} "
+                f"--tx-out {payment_addr}+0 --ttl 0 --fee 0 "
+                f"--out-file {tx_draft_file} --certificate-file {pool_dereg}"
+            )
+
+            # Calculate the minimum fee
+            min_fee = self.calc_min_fee(tx_draft_file, utxo_count, 
+                tx_out_count=1, witness_count=2)
 
             # Calculate the minimum fee
             result = self.__run(
@@ -894,20 +926,20 @@ class ShelleyTools():
             )
 
         # Build the raw transaction
-        tx_raw = self.working_dir / "pool_dereg_tx.raw"
+        tx_raw_file = self.working_dir / "pool_dereg_tx.raw"
         self.__run(
             f"{self.cli} shelley transaction build-raw{tx_in_str} "
             f"--tx-out {payment_addr}+{utxo_total - min_fee} --ttl {ttl} "
-            f"--fee {min_fee} --out-file {tx_raw} "
+            f"--fee {min_fee} --out-file {tx_raw_file} "
             f"--certificate-file {pool_dereg}"
         )
 
         # Sign it with both the payment signing key and the cold signing key.
-        tx_signed = self.working_dir / "pool_dereg_tx.signed"
+        tx_signed_file = self.working_dir / "pool_dereg_tx.signed"
         self.__run(
             f"{self.cli} shelley transaction sign --tx-body-file {tx_raw} "
             f"--signing-key-file {payment_skey} --signing-key-file {cold_skey}"
-            f" {self.network} --out-file {tx_signed}"
+            f" {self.network} --out-file {tx_signed_file}"
         )
 
         # Submit the transaction
@@ -915,6 +947,12 @@ class ShelleyTools():
             f"{self.cli} shelley transaction submit "
             f"--tx-file {tx_signed} {self.network}"
         )
+
+        # Delete the transaction files if specified.
+        if cleanup:
+            self.__cleanup_file(tx_draft_file)
+            self.__cleanup_file(tx_raw_file)
+            self.__cleanup_file(tx_signed_file)
 
 
 if __name__ == "__main__":
