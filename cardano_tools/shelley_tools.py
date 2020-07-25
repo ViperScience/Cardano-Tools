@@ -54,7 +54,7 @@ class ShelleyTools():
                 print(f"CMD: \"{cmd}\"")
                 result = self.ssh.run(cmd, warn=True)
                 print(f"stdout: \"{result.stdout}\"")
-                print(f"stdout: \"{result.stderr}\"")
+                print(f"stderr: \"{result.stderr}\"")
             else:
                 result = self.ssh.run(cmd, warn=True, hide=True)
             stdout = result.stdout.strip()
@@ -72,7 +72,7 @@ class ShelleyTools():
             if self.debug:
                 print(f"CMD: \"{cmd}\"")
                 print(f"stdout: \"{stdout}\"")
-                print(f"stdout: \"{stderr}\"")
+                print(f"stderr: \"{stderr}\"")
 
         ResultType = namedtuple("Result", "stdout, stderr")
         return ResultType(stdout, stderr)
@@ -264,7 +264,7 @@ class ShelleyTools():
             Address to send the ADA to.
         from_addr : str
             Address to send the ADA from.
-        key_file : str, Path
+        key_file : str or Path
             Path to the send address signing key file.
         cleanup : bool, optional
             Flag that indicates if the temporary transaction files should be
@@ -300,7 +300,8 @@ class ShelleyTools():
             )
 
             # Calculate the minimum fee
-            min_fee = self.calc_min_fee(tx_draft_file, utxo_count, 2, 1)
+            min_fee = self.calc_min_fee(tx_draft_file, utxo_count,
+                tx_out_count=2, witness_count=1)
 
             if utxo_total > (payment + min_fee):
                 break
@@ -353,6 +354,20 @@ class ShelleyTools():
     def register_stake_address(self, addr, stake_vkey_file, stake_skey_file,
                                pmt_skey_file, cleanup=True):
         """Register a stake address in the blockchain.
+
+        Parameters
+        ----------
+        addr : str
+            Address of the staking key being registered.
+        stake_vkey_file : str or Path
+            Path to the staking verification key.
+        stake_skey_file : str or Path
+            Path to the staking signing key.
+        pmt_skey_file : str or Path
+            Path to the payment signing key.
+        cleanup : bool, optional
+            Flag that indicates if the temporary transaction files should be
+            removed when finished (defaults to True).
         """
 
         # Build a transaction name
@@ -386,22 +401,25 @@ class ShelleyTools():
 
         # Iterate through the UTXOs until we have enough funds to cover the
         # transaction. Also, create the tx_in string for the transaction.
+        tx_draft_file = Path(self.working_dir) / (tx_name + ".draft")
         utxo_total = 0
         tx_in_str = ""
         for idx, utxo in enumerate(utxos):
+            utxo_count = idx + 1
             utxo_total += int(utxo['Lovelace'])
             tx_in_str += f" --tx-in {utxo['TxHash']}#{utxo['TxIx']}"
 
-            # Calculate the minimum fee
-            result = self.__run(
-                f"{self.cli} shelley transaction calculate-min-fee "
-                f"--tx-in-count {idx + 1} --tx-out-count 1 --ttl {ttl} "
-                f"{self.network} --signing-key-file {pmt_skey_file} "
-                f"--signing-key-file {stake_skey_file} "
+            # Build a transaction draft
+            self.__run(
+                f"{self.cli} shelley transaction build-raw{tx_in_str} "
+                f"--tx-out {addr}+0 --ttl 0 --fee 0 "
                 f"--certificate-file {stake_cert_path} "
-                f"--protocol-params-file {params_file}"
+                f"--out-file {tx_draft_file}"
             )
-            min_fee = int(result.stdout.split()[1])
+
+            # Calculate the minimum fee
+            min_fee = self.calc_min_fee(tx_draft_file, utxo_count, 
+                tx_out_count=1, witness_count=2)
 
             # TX cost
             cost = min_fee + self.protocol_parameters["keyDeposit"]
@@ -445,6 +463,7 @@ class ShelleyTools():
 
         # Delete the transaction files if specified.
         if cleanup:
+            self.__cleanup_file(tx_draft_file)
             self.__cleanup_file(tx_raw_file)
             self.__cleanup_file(tx_signed_file)
 
