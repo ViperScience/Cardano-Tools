@@ -677,7 +677,6 @@ class ShelleyTools():
         # use a list of dictionaries where each dict represents a relay.
         relay_args = ""
         for relay in pool_relays:
-            port_arg = f"--pool-relay-port {relay['port']}"
             if "ipv4" in relay['host-type']:
                 host_arg = f"--pool-relay-ipv4 {relay['host']}"
             elif "ipv6" in relay['host-type']:
@@ -685,10 +684,12 @@ class ShelleyTools():
             elif "single" in relay['host-type']:
                 host_arg = f"--single-host-pool-relay {relay['host']}"
             elif "multi" in relay['host-type']:
-                host_arg = f"--multi-host-pool-relay {relay['host']}"
+                relay_args += f"--multi-host-pool-relay {relay['host']}"
+                continue  # No port info for this case
             else:
-                continue
-            relay_args += f"{port_arg} {host_arg} "
+                continue  # Skip if invalid host type
+            port_arg = f"--pool-relay-port {relay['port']}"
+            relay_args += f"{host_arg} {port_arg} "
 
         # Create the argument string for the list of owner verification keys.
         owner_vkey_args = ""
