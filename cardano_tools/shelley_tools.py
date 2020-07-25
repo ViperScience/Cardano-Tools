@@ -746,23 +746,27 @@ class ShelleyTools():
 
         # Iterate through the UTXOs until we have enough funds to cover the
         # transaction. Also, create the tx_in string for the transaction.
+        tx_draft_file = Path(self.working_dir) / (tx_name + ".draft")
         utxo_total = 0
         min_fee = 1  # make this start greater than utxo_total
         tx_in_str = ""
         for idx, utxo in enumerate(utxos):
+            utxo_count = idx + 1
             utxo_total += int(utxo['Lovelace'])
             tx_in_str += f" --tx-in {utxo['TxHash']}#{utxo['TxIx']}"
 
-            # Calculate the minimum fee
-            result = self.__run(
-                f"{self.cli} shelley transaction calculate-min-fee "
-                f"--tx-in-count {idx + 1} --tx-out-count 1 --ttl {ttl} "
-                f"{self.network} --signing-key-file {payment_skey} "
-                f"{signing_key_args} --signing-key-file {pool_cold_skey} "
+            # Build a transaction draft
+            self.__run(
+                f"{self.cli} shelley transaction build-raw{tx_in_str} "
+                f"--tx-out {payment_addr}+0 --ttl 0 --fee 0 "
+                f"--out-file {tx_draft_file} "
                 f"--certificate-file {pool_cert_path} {del_cert_args}"
-                f"--protocol-params-file {params_file}"
             )
-            min_fee = int(result.stdout.split()[1])
+
+            # Calculate the minimum fee
+            min_fee = self.calc_min_fee(tx_draft_file, utxo_count, 
+                tx_out_count=1, witness_count=(len(signing_key_args) + 2))
+
             if utxo_total > (min_fee + pool_deposit):
                 break
 
@@ -803,6 +807,7 @@ class ShelleyTools():
 
         # Delete the transaction files if specified.
         if cleanup:
+            self.__cleanup_file(tx_draft_file)
             self.__cleanup_file(tx_raw_file)
             self.__cleanup_file(tx_signed_file)
 
