@@ -22,7 +22,7 @@ Provided tools include:
   * Retire a stake pool
 
 This project is developed and maintained by the team at 
-[Viper Staking](https://viperscience.com/adapool#portfolio).
+[Viper Staking](https://viperstaking.com/).
 
 ## Installation
 
@@ -90,6 +90,10 @@ shelley = ShelleyTools(
     ssh=conn
 )
 ```
+
+## Related Projects
+
+The Cardano-Tools library is also used in the official [Viper Staking Docker containers](https://gitlab.com/viper-staking/docker-containers).
 
 ## Support
 
