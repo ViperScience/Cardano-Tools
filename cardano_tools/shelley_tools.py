@@ -748,7 +748,7 @@ class ShelleyTools():
 
         # Iterate through the UTXOs until we have enough funds to cover the
         # transaction. Also, create the tx_in string for the transaction.
-        tx_name = datetime.now().strftime("reg_stake_key_%Y-%m-%d_%Hh%Mm%Ss")
+        tx_name = datetime.now().strftime("reg_pool_%Y-%m-%d_%Hh%Mm%Ss")
         tx_draft_file = Path(self.working_dir) / (tx_name + ".draft")
         utxo_total = 0
         min_fee = 1  # make this start greater than utxo_total
@@ -767,7 +767,7 @@ class ShelleyTools():
             )
 
             # Calculate the minimum fee
-            nwit = len(signing_key_args) + 2
+            nwit = len(owner_stake_skeys) + 2
             min_fee = self.calc_min_fee(tx_draft_file, utxo_count,
                                         tx_out_count=1, witness_count=nwit)
 
