@@ -14,7 +14,7 @@ class ShelleyError(Exception):
 class ShelleyTools():
 
     def __init__(self, path_to_cli, path_to_socket, working_dir,
-                 ttl_buffer=1000, ssh=None, network="--mainnnet"):
+                 ttl_buffer=1000, ssh=None, network="--mainnet"):
 
         # Debug flag -- may be set after object initialization.
         self.debug = False
@@ -814,6 +814,242 @@ class ShelleyTools():
             self.__cleanup_file(tx_raw_file)
             self.__cleanup_file(tx_signed_file)
 
+    def update_stake_pool_registration(self, pool_name, pool_pledge, pool_cost,
+                            pool_margin, pool_cold_vkey, pool_cold_skey,
+                            pool_vrf_key, pool_reward_vkey, owner_stake_vkeys,
+                            owner_stake_skeys, payment_addr, payment_skey,
+                            genesis_file, pool_relays=None,
+                            pool_metadata_url=None, pool_metadat_hash=None,
+                            folder=None, cleanup=True):
+        """Update an existing stake pool registration on the blockchain.
+
+        Parameters
+        ----------
+        pool_name : str
+            Pool name for file/certificate naming.
+        pool_metadata : dict
+            Dictionary of stake pool metadata to be converted to json.
+        pool_pledge : int
+            Pool pledge amount in lovelace.
+        pool_cost : int
+            Pool cost (fixed fee per epoch) in lovelace.
+        pool_margin : float
+            Pool margin (variable fee) as a percentage.
+        pool_cold_vkey : str or Path
+            Path to the pool's cold verification key.
+        pool_cold_skey : str or Path
+            Path to the pool's cold signing key.
+        pool_vrf_key : str or Path
+            Path to the pool's verification key.
+        pool_reward_vkey : str or Path
+            Path to the staking verification key that will receive pool
+            rewards.
+        owner_stake_vkeys : list
+            List of owner stake verification keys (paths) responsible for the
+            pledge.
+        owner_stake_skeys : list
+            List of owner stake signing keys (paths) responsible for the
+            pledge.
+        payment_addr : str
+            Address responsible for paying the pool registration and
+            transaction fees.
+        payment_skey : str or Path
+            Signing key for the address responsible for paying the pool
+            registration and transaction fees.
+        genesis_file : str or Path
+            Path to the genesis file.
+        pool_relays: list, optional,
+            List of dictionaries each representing a pool relay. The
+            dictionaries have three required keys:
+                "port" specifying the relay's port number,
+                "host" specifying the host name (IP, DNS, etc.),
+                "host-type" specifying the type of data in the "host" key.
+        pool_metadata_url : str, optional
+            URL to the pool's metadata JSON file.
+        pool_metadat_hash : str, optional
+            Optionally specify the hash of the metadata JSON file. If this is
+            not specified and the pool_metadat_hash is, then the code will
+            download the file from the URL and compute the hash.
+        folder : str, Path, optional
+            The directory where the generated files/certs will be placed.
+        cleanup : bool, optional
+            Flag that indicates if the temporary transaction files should be
+            removed when finished (defaults to True).
+        """
+
+        # Get a working directory to store the generated files and make sure
+        # the directory exists.
+        if folder is None:
+            folder = self.working_dir
+        else:
+            folder = Path(folder)
+            if self.ssh is None:
+                folder.mkdir(parents=True, exist_ok=True)
+            else:
+                self.__run(f"mkdir -p \"{folder}\"")
+
+        # Get the hash of the JSON file if the URL is provided and the hash is
+        # not specified.
+        metadata_args = ""
+        if pool_metadata_url is not None:
+            if pool_metadat_hash is None:
+                metadata_file = folder / "metadata_file_download.json"
+                self.__download_file(pool_metadata_url, metadata_file)
+                result = self.__run(
+                    f"{self.cli} shelley stake-pool metadata-hash "
+                    f"--pool-metadata-file {metadata_file}"
+                )
+                pool_metadat_hash = result.stdout.strip()
+
+            # Create the arg string for the pool cert.
+            metadata_args = (
+                f"--metadata-url {pool_metadata_url} "
+                f"--metadata-hash {pool_metadat_hash}"
+            )
+        print(pool_metadat_hash)
+
+        # Create the relay arg string. Basically, we need a port and host arg
+        # but there can be different forms of the host argument. See the
+        # caradno-cli documentation. The simpliest way I could figure was to
+        # use a list of dictionaries where each dict represents a relay.
+        relay_args = ""
+        for relay in pool_relays:
+            if "ipv4" in relay['host-type']:
+                host_arg = f"--pool-relay-ipv4 {relay['host']}"
+            elif "ipv6" in relay['host-type']:
+                host_arg = f"--pool-relay-ipv4 {relay['host']}"
+            elif "single" in relay['host-type']:
+                host_arg = f"--single-host-pool-relay {relay['host']}"
+            elif "multi" in relay['host-type']:
+                relay_args += f"--multi-host-pool-relay {relay['host']}"
+                continue  # No port info for this case
+            else:
+                continue  # Skip if invalid host type
+            port_arg = f"--pool-relay-port {relay['port']}"
+            relay_args += f"{host_arg} {port_arg} "
+
+        # Create the argument string for the list of owner verification keys.
+        owner_vkey_args = ""
+        for key_path in owner_stake_vkeys:
+            arg = f"--pool-owner-stake-verification-key-file {key_path} "
+            owner_vkey_args += arg
+
+        # Generate Stake pool registration certificate
+        pool_cert_path = folder / (pool_name + "_registration.cert")
+        self.__run(
+            f"{self.cli} shelley stake-pool registration-certificate "
+            f"--cold-verification-key-file {pool_cold_vkey} "
+            f"--vrf-verification-key-file {pool_vrf_key} "
+            f"--pool-pledge {pool_pledge} "
+            f"--pool-cost {pool_cost} "
+            f"--pool-margin {pool_margin/100} "
+            f"--pool-reward-account-verification-key-file {pool_reward_vkey} "
+            f"{owner_vkey_args} {relay_args} {metadata_args} "
+            f"{self.network} --out-file {pool_cert_path}"
+        )
+
+        # TODO: Edit the cert free text?
+
+        # Generate delegation certificate (pledge from each owner)
+        del_cert_args = ""
+        signing_key_args = ""
+        for key_path in owner_stake_vkeys:
+            key_path = Path(key_path)
+            cert_path = key_path.parent / (key_path.stem + "_delegation.cert")
+            del_cert_args += f"--certificate-file {cert_path} "
+            self.__run(
+                f"{self.cli} shelley stake-address delegation-certificate "
+                f"--stake-verification-key-file {key_path} "
+                f"--cold-verification-key-file {pool_cold_vkey} "
+                f"--out-file {cert_path}"
+            )
+
+        # Generate a list of owner signing key args.
+        for key_path in owner_stake_skeys:
+            signing_key_args += f"--signing-key-file {key_path} "
+
+        # Get the pool deposit from the network genesis parameters.
+        pool_deposit = 0  # re-registration doesn't require deposit
+
+        # Get a list of UTXOs and sort them in decending order by value.
+        utxos = self.get_utxos(payment_addr)
+        utxos.sort(key=lambda k: k["Lovelace"], reverse=True)
+
+        # Determine the TTL
+        tip = self.get_tip()
+        ttl = tip + self.ttl_buffer
+
+        # Ensure the parameters file exists
+        self.load_protocol_parameters()
+
+        # Iterate through the UTXOs until we have enough funds to cover the
+        # transaction. Also, create the tx_in string for the transaction.
+        tx_name = datetime.now().strftime("reg_pool_%Y-%m-%d_%Hh%Mm%Ss")
+        tx_draft_file = Path(self.working_dir) / (tx_name + ".draft")
+        utxo_total = 0
+        min_fee = 1  # make this start greater than utxo_total
+        tx_in_str = ""
+        for idx, utxo in enumerate(utxos):
+            utxo_count = idx + 1
+            utxo_total += int(utxo['Lovelace'])
+            tx_in_str += f" --tx-in {utxo['TxHash']}#{utxo['TxIx']}"
+
+            # Build a transaction draft
+            self.__run(
+                f"{self.cli} shelley transaction build-raw{tx_in_str} "
+                f"--tx-out {payment_addr}+0 --ttl 0 --fee 0 "
+                f"--out-file {tx_draft_file} "
+                f"--certificate-file {pool_cert_path} {del_cert_args}"
+            )
+
+            # Calculate the minimum fee
+            nwit = len(owner_stake_skeys) + 2
+            min_fee = self.calc_min_fee(tx_draft_file, utxo_count,
+                                        tx_out_count=1, witness_count=nwit)
+
+            if utxo_total > (min_fee + pool_deposit):
+                break
+
+        if utxo_total < min_fee:
+            cost_ada = (min_fee + pool_deposit)/1_000_000
+            utxo_total_ada = utxo_total/1_000_000
+            raise ShelleyError(
+                f"Transaction failed due to insufficient funds. Account "
+                f"{payment_addr} cannot pay tranction costs of {cost_ada} "
+                f"lovelaces because it only contains {utxo_total_ada} ADA."
+            )
+
+        # Build the transaction to submit the pool certificate and delegation
+        # certificate(s) to the blockchain.
+        tx_raw_file = Path(self.working_dir) / (tx_name + ".raw")
+        self.__run(
+            f"{self.cli} shelley transaction build-raw{tx_in_str} "
+            f"--tx-out {payment_addr}+{utxo_total - min_fee - pool_deposit} "
+            f"--ttl {ttl} --fee {min_fee} --out-file {tx_raw_file} "
+            f"--certificate-file {pool_cert_path} {del_cert_args}"
+        )
+
+        # Sign the transaction with both the payment and stake keys.
+        tx_signed_file = Path(self.working_dir) / (tx_name + ".signed")
+        self.__run(
+            f"{self.cli} shelley transaction sign "
+            f"--tx-body-file {tx_raw_file} --signing-key-file {payment_skey} "
+            f"{signing_key_args} --signing-key-file {pool_cold_skey} "
+            f"{self.network} --out-file {tx_signed_file}"
+        )
+
+        # Submit the transaction
+        self.__run(
+            f"{self.cli} shelley transaction submit "
+            f"--tx-file {tx_signed_file} {self.network}"
+        )
+
+        # Delete the transaction files if specified.
+        if cleanup:
+            self.__cleanup_file(tx_draft_file)
+            self.__cleanup_file(tx_raw_file)
+            self.__cleanup_file(tx_signed_file)
+
     def retire_stake_pool(self, remaining_epochs, genesis_file, cold_vkey,
                           cold_skey, payment_skey, payment_addr, cleanup=True):
         """Retire a stake pool using the stake pool keys.
@@ -947,6 +1183,13 @@ class ShelleyTools():
             self.__cleanup_file(tx_raw_file)
             self.__cleanup_file(tx_signed_file)
 
+    def get_stake_pool_id(self, cold_vkey) -> str:
+        """Return the stake pool ID associated with the supplied cold key.
+        """
+        return self.run(
+            f"{self.cli} shelley stake-pool id "
+            f"--verification-key-file {cold_vkey}"
+        )
 
 if __name__ == "__main__":
     # Not used as a script
