@@ -223,6 +223,15 @@ class ShelleyTools():
             })
         return utxos
 
+    def query_balance(self, addr) -> int:
+        """Query an address balance in lovelace.
+        """
+        total = 0
+        utxos = self.get_utxos(addr)
+        for utxo in utxos:
+            total += int(utxo["Lovelace"])
+        return total
+
     def calc_min_fee(self, tx_draft, tx_in_count, tx_out_count, witness_count,
                      byron_witness_count=0) -> int:
         """Calculate the minimum fee in lovelaces for the transaction.
@@ -549,6 +558,11 @@ class ShelleyTools():
 
         return pool_id  # Return the pool id after first saving it to a file.
 
+    def update_kes_keys(self):
+        """
+        """
+        pass
+
     def create_metadata_file(self, pool_metadata, folder=None) -> str:
         """ Create a JSON file with the pool metadata and return the file hash.
         """
@@ -634,7 +648,7 @@ class ShelleyTools():
             Optionally specify the hash of the metadata JSON file. If this is
             not specified and the pool_metadat_hash is, then the code will
             download the file from the URL and compute the hash.
-        folder : str, Path, optional
+        folder : str or Path, optional
             The directory where the generated files/certs will be placed.
         cleanup : bool, optional
             Flag that indicates if the temporary transaction files should be
@@ -734,10 +748,12 @@ class ShelleyTools():
         # Get the pool deposit from the network genesis parameters.
         json_data = self.__load_text_file(genesis_file)
         pool_deposit = json.loads(json_data)["protocolParams"]["poolDeposit"]
+        print(pool_deposit)
 
         # Get a list of UTXOs and sort them in decending order by value.
         utxos = self.get_utxos(payment_addr)
         utxos.sort(key=lambda k: k["Lovelace"], reverse=True)
+        print(utxos)
 
         # Determine the TTL
         tip = self.get_tip()
@@ -771,10 +787,13 @@ class ShelleyTools():
             min_fee = self.calc_min_fee(tx_draft_file, utxo_count,
                                         tx_out_count=1, witness_count=nwit)
 
-            if utxo_total > (min_fee + pool_deposit):
-                break
+            print(utxo_count)
+            print(utxo_total)
 
-        if utxo_total < min_fee:
+            # if utxo_total > (min_fee + pool_deposit + 10):
+            #     break
+
+        if utxo_total < (min_fee + pool_deposit):
             cost_ada = (min_fee + pool_deposit)/1_000_000
             utxo_total_ada = utxo_total/1_000_000
             raise ShelleyError(
@@ -1185,11 +1204,273 @@ class ShelleyTools():
 
     def get_stake_pool_id(self, cold_vkey) -> str:
         """Return the stake pool ID associated with the supplied cold key.
+
+        Parameters
+        ----------
+        cold_vkey : str or Path
+            Path to the pool's cold verification key.
+
+        Returns
+        ----------
+        str
+            The stake pool id.
         """
-        return self.run(
+        result = self.__run(
             f"{self.cli} shelley stake-pool id "
             f"--verification-key-file {cold_vkey}"
         )
+        pool_id = result.stdout
+        return pool_id
+
+    def claim_staking_rewards(self, stake_addr, stake_skey, receive_addr, 
+        payment_skey, payment_addr=None, cleanup=True):
+        """Withdraw staking address rewards to a spending address.
+
+        Thanks to @ATADA_Stakepool who's scripts greatly influenced the 
+        development of this function. https://github.com/gitmachtl/scripts
+
+        Parameters
+        ----------
+        stake_addr : str
+            Staking address from which to withdraw the rewards.
+        stake_skey : str or Path
+            Path to the staking address signing key.
+        receive_addr : str
+            Spending address to receive the rewards. 
+        payment_skey : str or Path
+            Path to the signing key for the account paying the tx fees.
+        payment_addr : str, optional
+            Optionally use a second account to pay the tx fees.
+        cleanup : bool, optional
+            Flag that indicates if the temporary transaction files should be
+            removed when finished (defaults to True).
+        """
+        
+        # Calculate the amount to withdraw.
+        rewards = self.get_rewards_balance(stake_addr)
+        if rewards <= 0.0:
+            raise ShelleyError(
+                f"No rewards availible in stake address {stake_addr}."
+            )
+        withdrawal_str = f"{stake_addr}+{rewards}"
+
+        # Get a list of UTXOs and sort them in decending order by value.
+        if payment_addr is None:
+            payment_addr = receive_addr
+        utxos = self.get_utxos(payment_addr)
+        if len(utxos) < 1:
+            raise ShelleyError(
+                f"Transaction failed due to insufficient funds. "
+                f"Account {addr} cannot pay tranction costs because "
+                "it does not contain any ADA."
+            )
+        utxos.sort(key=lambda k: k["Lovelace"], reverse=True)
+
+        # Build a transaction name
+        tx_name = datetime.now().strftime("claim_rewards_%Y-%m-%d_%Hh%Mm%Ss")
+
+        # Ensure the parameters file exists
+        self.load_protocol_parameters()
+
+        # Determine the TTL
+        tip = self.get_tip()
+        ttl = tip + self.ttl_buffer
+
+        # Iterate through the UTXOs until we have enough funds to cover the
+        # transaction. Also, create the tx_in string for the transaction.
+        tx_draft_file = Path(self.working_dir) / (tx_name + ".draft")
+        utxo_total = 0
+        tx_in_str = ""
+        for idx, utxo in enumerate(utxos):
+            utxo_count = idx + 1
+            utxo_total += int(utxo['Lovelace'])
+            tx_in_str += f" --tx-in {utxo['TxHash']}#{utxo['TxIx']}"
+
+            # If the address receiving the funds is also paying the TX fee.
+            if payment_addr == receive_addr:
+                # Build a transaction draft
+                self.__run(
+                    f"{self.cli} shelley transaction build-raw{tx_in_str} "
+                    f"--tx-out {receive_addr}+0 --ttl 0 --fee 0 "
+                    f"--withdrawal {withdrawal_str} --out-file {tx_draft_file}"
+                )
+
+                # Calculate the minimum fee
+                min_fee = self.calc_min_fee(tx_draft_file, utxo_count,
+                                            tx_out_count=1, witness_count=2)
+
+            # If another address is paying the TX fee.
+            else:
+                # Build a transaction draft
+                self.__run(
+                    f"{self.cli} shelley transaction build-raw{tx_in_str} "
+                    f"--tx-out {receive_addr}+0 --tx-out {payment_addr}+0 "
+                    f"--ttl 0 --fee 0 --withdrawal {withdrawal_str} "
+                    f"--out-file {tx_draft_file}"
+                )
+
+                # Calculate the minimum fee
+                min_fee = self.calc_min_fee(tx_draft_file, utxo_count,
+                                            tx_out_count=2, witness_count=2)
+
+            # If we have enough in the UTXO we are done, otherwise, continue.
+            if utxo_total > min_fee:
+                break
+
+        if utxo_total < min_fee:
+            cost_ada = min_fee/1_000_000
+            utxo_total_ada = utxo_total/1_000_000
+            a = receive_addr if payment_addr == receive_addr else payment_addr
+            raise ShelleyError(
+                f"Transaction failed due to insufficient funds. "
+                f"Account {a} cannot pay tranction costs of {cost_ada} "
+                f"ADA because it only contains {utxo_total_ada} ADA."
+            )
+        
+        # Build the transaction.
+        tx_raw_file = Path(self.working_dir) / (tx_name + ".raw")
+        if payment_addr == receive_addr:  
+            # If the address receiving the funds is also paying the TX fee.  
+            self.__run(
+                f"{self.cli} shelley transaction build-raw{tx_in_str} "
+                f"--tx-out {receive_addr}+{utxo_total - min_fee + rewards} "
+                f"--ttl {ttl} --fee {min_fee} --withdrawal {withdrawal_str} "
+                f"--out-file {tx_raw_file}"
+            )
+        else:
+            # If another address is paying the TX fee.
+            self.__run(
+                f"{self.cli} shelley transaction build-raw{tx_in_str} "
+                f"--tx-out {payment_addr}+{utxo_total - min_fee} "
+                f"--tx-out {receive_addr}+{rewards} "
+                f"--ttl {ttl} --fee {min_fee} --withdrawal {withdrawal_str} "
+                f"--out-file {tx_raw_file}"
+            )
+
+        # Sign the transaction with both the payment and stake keys.
+        tx_signed_file = Path(self.working_dir) / (tx_name + ".signed")
+        self.__run(
+            f"{self.cli} shelley transaction sign "
+            f"--tx-body-file {tx_raw_file} --signing-key-file {payment_skey} "
+            f"--signing-key-file {stake_skey} {self.network} "
+            f"--out-file {tx_signed_file}"
+        )
+
+        # Submit the transaction
+        self.__run(
+            f"{self.cli} shelley transaction submit "
+            f"--tx-file {tx_signed_file} {self.network}"
+        )
+
+        # Delete the transaction files if specified.
+        if cleanup:
+            self.__cleanup_file(tx_draft_file)
+            self.__cleanup_file(tx_raw_file)
+            self.__cleanup_file(tx_signed_file)
+
+    def convert_itn_keys(self, itn_prv_key, itn_pub_key, folder=None) -> str:
+        """Convert ITN account keys to Shelley staking keys.
+
+        Parameters
+        ----------
+        itn_prv_key : str or Path
+            Path to the ITN private key file.
+        itn_pub_key : str or Path
+            Path to the ITN public key file.
+        folder : str or Path, optional
+            The directory where the generated files/certs will be placed.
+
+        Returns
+        -------
+        str
+            New Shelley staking wallet address.
+
+        Raises
+        ------
+        ShelleyError
+            If the private key is not in a known format.
+        """
+
+        # Get a working directory to store the generated files and make sure
+        # the directory exists.
+        if folder is None:
+            folder = self.working_dir
+        else:
+            folder = Path(folder)
+            if self.ssh is None:
+                folder.mkdir(parents=True, exist_ok=True)
+            else:
+                self.__run(f"mkdir -p \"{folder}\"")
+
+        # Open the private key file to check its format.
+        prvkey = open(itn_prv_key, 'r').read()
+
+        # Convert the private key
+        skey_file = folder / (Path(itn_prv_key).stem + "_shelley_staking.skey")
+        if prvkey[:8] == "ed25519e":
+            self.__run(
+                f"{self.cli} shelley key convert-itn-extended-key "
+                f"--itn-signing-key-file {itn_prv_key} "
+                f"--out-file {skey_file}"
+            )
+        elif prvkey[:8] == "ed25519b":
+            self.__run(
+                f"{self.cli} shelley key convert-itn-bip32-key "
+                f"--itn-signing-key-file {itn_prv_key} "
+                f"--out-file {skey_file}"
+            )
+        elif prvkey[:7] == "ed25519":
+            self.__run(
+                f"{self.cli} shelley key convert-itn-key "
+                f"--itn-signing-key-file {itn_prv_key} "
+                f"--out-file {skey_file}"
+            )
+        else:
+            raise ShelleyError("Invalid ITN private key format.")
+
+        # Convert the public key
+        vkey_file = folder / (Path(itn_pub_key).stem + "_shelley_staking.vkey")
+        self.__run(
+            f"{self.cli} shelley key convert-itn-key "
+            f"--itn-verification-key-file {itn_pub_key} "
+            f"--out-file {vkey_file}"
+        )
+
+        # Create the staking address
+        addr_file = folder / (Path(itn_pub_key).stem + "_shelley_staking.addr")
+        self.__run(
+            f"{self.cli} shelley stake-address build "
+            f"--stake-verification-key-file {vkey_file} "
+            f"--out-file {addr_file} {self.network}"
+        )
+
+        # Read the file and return the staking address.
+        addr = self.__load_text_file(addr_file).strip()
+        return addr
+
+    def get_rewards_balance(self, stake_addr) -> int:
+        """Return the balance in a Shelley staking rewards account.
+
+        Parameters
+        ----------
+        addr : str
+            Staking address.
+
+        Returns
+        ----------
+        int
+            Rewards balance in lovelaces. 
+        """
+        result = self.__run(
+            f"{self.cli} shelley query stake-address-info "
+            f"--address {stake_addr} {self.network}"
+        )
+        info = json.loads(result.stdout)
+        balance = 0
+        for key in info.keys():
+            balance = info[key]["rewardAccountBalance"]
+        return balance
+
 
 if __name__ == "__main__":
     # Not used as a script

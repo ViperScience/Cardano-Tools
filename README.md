@@ -16,6 +16,9 @@ Provided tools include:
   * Send a payment
   * Register a staking address
   * Get the blockchain tip
+  * Check staking rewards balance
+  * Claim staking rewards
+  * Claim ITN rewards
 * Creating and administrating a stake pool:
   * Create block producing keys
   * Register a stake pool
@@ -104,7 +107,7 @@ If you find our tools useful, please consider buying us a beer!
 
 ```
 # ADA
-DdzFFzCqrhstZCw5CwyKLaDvna3Myfioi1LL4up4D5nn5q4QyyhEw5nLNs5g46sTaCarHJKtLwviL1s5Ed6mdRUhX2vBc6A8queoJMpF
+addr1q9nth9ekvuuu8s7zg58rdf3duks6h067m0hstl0ca2d2dd27cf8l803uw3gfk0spwzr2y5kqncj6xguu4vs086q7xz3sckperc
 
 # BTC
 39sUg4DKBNHAFq5TeUJ8aiFGe7QpptifHE
