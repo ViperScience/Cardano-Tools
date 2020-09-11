@@ -1465,10 +1465,12 @@ class ShelleyTools():
             f"{self.cli} shelley query stake-address-info "
             f"--address {stake_addr} {self.network}"
         )
+        if "Failed" in result.stdout:
+            raise ShelleyError(result.stdout)
+        if len(result.stderr) > 0:
+            raise ShelleyError(result.stderr)
         info = json.loads(result.stdout)
-        balance = 0
-        for key in info.keys():
-            balance = info[key]["rewardAccountBalance"]
+        balance = sum(b["rewardAccountBalance"] for b in info)
         return balance
 
 
