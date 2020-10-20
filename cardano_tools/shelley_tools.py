@@ -476,6 +476,46 @@ class ShelleyTools():
             self.__cleanup_file(tx_raw_file)
             self.__cleanup_file(tx_signed_file)
 
+    def generate_kes_keys(self, pool_name="pool", folder=None) -> (str, str):
+        """Generate a new set of KES keys for a stake pool.
+
+        KES == Key Evolving Signature
+
+        Parameters
+        ----------
+        pool_name : str
+            Pool name for file/certificate naming.
+        folder : str or Path, optional
+            The directory where the generated files/certs will be placed.
+        
+        Returns
+        _______
+        (str, str)
+            Paths to the new verification and signing KES key files.
+        """
+
+        # Get a working directory to store the generated files and make sure
+        # the directory exists.
+        if folder is None:
+            folder = self.working_dir
+        else:
+            folder = Path(folder)
+            if self.ssh is None:
+                folder.mkdir(parents=True, exist_ok=True)
+            else:
+                self.__run(f"mkdir -p \"{folder}\"")
+
+        # Generate the KES Key pair
+        kes_vkey = folder / (pool_name + "_kes.vkey")
+        kes_skey = folder / (pool_name + "_kes.skey")
+        self.__run(
+            f"{self.cli} shelley node key-gen-KES "
+            f"--verification-key-file {kes_vkey} "
+            f"--signing-key-file {kes_skey}"
+        )
+
+        return (kes_vkey, kes_skey)
+
     def create_block_producing_keys(self, genesis_file, pool_name="pool",
                                     folder=None):
         """Create keys for a block-producing node.
@@ -489,6 +529,15 @@ class ShelleyTools():
             VRF Key pair,
             KES Key pair,
             Operational Certificate
+        
+        Parameters
+        ----------
+        genesis_file : str or Path
+            Path to the genesis file.
+        pool_name : str
+            Pool name for file/certificate naming.
+        folder : str or Path, optional
+            The directory where the generated files/certs will be placed.
         """
 
         # Get a working directory to store the generated files and make sure
@@ -523,13 +572,7 @@ class ShelleyTools():
         )
 
         # Generate the KES Key pair
-        kes_vkey = folder / (pool_name + "_kes.vkey")
-        kes_skey = folder / (pool_name + "_kes.skey")
-        self.__run(
-            f"{self.cli} shelley node key-gen-KES "
-            f"--verification-key-file {kes_vkey} "
-            f"--signing-key-file {kes_skey}"
-        )
+        self.generate_kes_keys(pool_name, folder)
 
         # Get the network genesis parameters
         json_data = self.__load_text_file(genesis_file)
@@ -558,10 +601,55 @@ class ShelleyTools():
 
         return pool_id  # Return the pool id after first saving it to a file.
 
-    def update_kes_keys(self):
+    def update_kes_keys(self, genesis_file, cold_skey, cold_counter,
+                        pool_name="pool", folder=None):
+        """Update KES keys for an existing stake pool.
+
+        Parameters
+        ----------
+        genesis_file : str or Path
+            Path to the genesis file.
+        cold_skey : str or Path
+            Path to the pool's cold signing key.
+        cold_counter : str or Path
+            Path to the pool's cold counter file.
+        pool_name : str
+            Pool name for file/certificate naming.
+        folder : str or Path, optional
+            The directory where the generated files/certs will be placed.
         """
-        """
-        pass
+
+        # Get a working directory to store the generated files and make sure
+        # the directory exists.
+        if folder is None:
+            folder = self.working_dir
+        else:
+            folder = Path(folder)
+            if self.ssh is None:
+                folder.mkdir(parents=True, exist_ok=True)
+            else:
+                self.__run(f"mkdir -p \"{folder}\"")
+
+        # Generate the new KES key pair
+        kes_vkey, kes_skey = self.generate_kes_keys(pool_name, folder)
+
+        # Generate the new pool operation certificate
+        # Get the network genesis parameters
+        json_data = self.__load_text_file(genesis_file)
+        genesis_parameters = json.loads(json_data)
+
+        # Generate the Operational Certificate
+        cert_file = folder / (pool_name + ".cert")
+        slots_kes_period = genesis_parameters["slotsPerKESPeriod"]
+        tip = self.get_tip()
+        kes_period = tip // slots_kes_period  # Integer division
+        self.__run(
+            f"{self.cli} shelley node issue-op-cert "
+            f"--kes-verification-key-file {kes_vkey} "
+            f"--cold-signing-key-file {cold_skey} "
+            f"--operational-certificate-issue-counter {cold_counter} "
+            f"--kes-period {kes_period} --out-file {cert_file}"
+        )
 
     def create_metadata_file(self, pool_metadata, folder=None) -> str:
         """ Create a JSON file with the pool metadata and return the file hash.
