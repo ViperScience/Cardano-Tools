@@ -21,6 +21,7 @@ Provided tools include:
   * Claim ITN rewards
 * Creating and administrating a stake pool:
   * Create block producing keys
+  * Updating pool KES keys
   * Register a stake pool
   * Retire a stake pool
 
