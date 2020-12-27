@@ -14,7 +14,8 @@ class ShelleyError(Exception):
 class ShelleyTools():
 
     def __init__(self, path_to_cli, path_to_socket, working_dir,
-                 ttl_buffer=1000, ssh=None, network="--mainnet"):
+                 ttl_buffer=1000, ssh=None, network="--mainnet",
+                 era="--allegra-era"):
 
         # Debug flag -- may be set after object initialization.
         self.debug = False
@@ -41,6 +42,7 @@ class ShelleyTools():
 
         self.ttl_buffer = ttl_buffer
         self.network = network
+        self.era = era
         self.protocol_parameters = None
 
     def __run(self, cmd):
@@ -138,8 +140,8 @@ class ShelleyTools():
         """
         params_file = self.working_dir / "protocol.json"
         self.__run(
-            f"{self.cli} shelley query protocol-parameters {self.network} "
-            f"--out-file {params_file}"
+            f"{self.cli} query protocol-parameters {self.network} "
+            f"{self.era} --out-file {params_file}"
         )
         json_data = self.__load_text_file(params_file)
         self.protocol_parameters = json.loads(json_data)
@@ -148,7 +150,7 @@ class ShelleyTools():
     def get_tip(self) -> int:
         """Query the node for the current tip of the blockchain.
         """
-        cmd = f"{self.cli} shelley query tip {self.network}"
+        cmd = f"{self.cli} query tip {self.network}"
         result = self.__run(cmd)
         if "slotNo" not in result.stdout:
             raise ShelleyError(result.stderr)
@@ -175,21 +177,21 @@ class ShelleyTools():
 
         # Generate payment key pair.
         self.__run(
-            f"{self.cli} shelley address key-gen "
+            f"{self.cli} address key-gen "
             f"--verification-key-file {payment_vkey} "
             f"--signing-key-file {payment_skey}"
         )
 
         # Generate stake key pair.
         self.__run(
-            f"{self.cli} shelley stake-address key-gen "
+            f"{self.cli} stake-address key-gen "
             f"--verification-key-file {stake_vkey} "
             f"--signing-key-file {stake_skey}"
         )
 
         # Create the payment address.
         self.__run(
-            f"{self.cli} shelley address build "
+            f"{self.cli} address build "
             f"--payment-verification-key-file {payment_vkey} "
             f"--stake-verification-key-file {stake_vkey} "
             f"--out-file {payment_addr} {self.network}"
@@ -197,7 +199,7 @@ class ShelleyTools():
 
         # Create the staking address.
         self.__run(
-            f"{self.cli} shelley stake-address build "
+            f"{self.cli} stake-address build "
             f"--stake-verification-key-file {stake_vkey} "
             f"--out-file {stake_addr} {self.network}"
         )
@@ -210,8 +212,9 @@ class ShelleyTools():
         """Query the list of UTXOs for a given address and parse the output.
         The returned data is formatted as a list of dict objects.
         """
-        cmd = f"{self.cli} shelley query utxo --address {addr} {self.network}"
-        result = self.__run(cmd)
+        result = self.__run(
+            f"{self.cli} query utxo --address {addr} {self.network} {self.era}"
+        )
         raw_utxos = result.stdout.split('\n')[2:]
         utxos = []
         for utxo_line in raw_utxos:
@@ -251,7 +254,7 @@ class ShelleyTools():
         """
         params_file = self.load_protocol_parameters()
         result = self.__run(
-            f"{self.cli} shelley transaction calculate-min-fee "
+            f"{self.cli} transaction calculate-min-fee "
             f"--tx-body-file {tx_draft} "
             f"--tx-in-count {tx_in_count} "
             f"--tx-out-count {tx_out_count} "
@@ -262,7 +265,8 @@ class ShelleyTools():
         min_fee = int(result.stdout.split()[0])
         return min_fee
 
-    def send_payment(self, amt, to_addr, from_addr, key_file, cleanup=True):
+    def send_payment(self, amt, to_addr, from_addr, key_file, offline=False,
+                     cleanup=True):
         """Send ADA from one address to another.
 
         Parameters
@@ -275,6 +279,10 @@ class ShelleyTools():
             Address to send the ADA from.
         key_file : str or Path
             Path to the send address signing key file.
+        offline: bool, optional
+            Flag to indicate if the transactions is being generated offline.
+            If true (defaults to false), the transaction file is signed but
+            not sent.
         cleanup : bool, optional
             Flag that indicates if the temporary transaction files should be
             removed when finished (defaults to True).
@@ -293,6 +301,7 @@ class ShelleyTools():
         tx_draft_file = Path(self.working_dir) / (tx_name + ".draft")
         utxo_total = 0
         tx_in_str = ""
+        min_fee = 0
         for count, utxo in enumerate(utxos):
 
             utxo_count = count + 1
@@ -303,7 +312,7 @@ class ShelleyTools():
 
             # Build a transaction draft
             self.__run(
-                f"{self.cli} shelley transaction build-raw{tx_in_str} "
+                f"{self.cli} transaction build-raw{tx_in_str} "
                 f"--tx-out {to_addr}+0 --tx-out {from_addr}+0 "
                 f"--ttl 0 --fee 0 --out-file {tx_draft_file}"
             )
@@ -334,34 +343,33 @@ class ShelleyTools():
         # Build the transaction
         tx_raw_file = Path(self.working_dir) / (tx_name + ".raw")
         self.__run(
-            f"{self.cli} shelley transaction build-raw{tx_in_str} "
-            f"--tx-out {to_addr}+{payment} "
-            f"--tx-out {from_addr}+{utxo_total - total_lovelace_out} "
+            f"{self.cli} transaction build-raw{tx_in_str} "
+            f"--tx-out {to_addr}+{payment:.0f} "
+            f"--tx-out {from_addr}+{(utxo_total - total_lovelace_out):.0f} "
             f"--ttl {ttl} --fee {min_fee} --out-file {tx_raw_file}"
         )
 
         # Sign the transaction with the signing key
         tx_signed_file = Path(self.working_dir) / (tx_name + ".signed")
         self.__run(
-            f"{self.cli} shelley transaction sign "
+            f"{self.cli} transaction sign "
             f"--tx-body-file {tx_raw_file} --signing-key-file {key_file} "
             f"{self.network} --out-file {tx_signed_file}"
         )
 
-        # Submit the transaction
-        self.__run(
-            f"{self.cli} shelley transaction submit "
-            f"--tx-file {tx_signed_file} {self.network}"
-        )
-
-        # Delete the transaction files if specified.
+        # Delete the intermediate transaction files if specified.
         if cleanup:
             self.__cleanup_file(tx_draft_file)
             self.__cleanup_file(tx_raw_file)
-            self.__cleanup_file(tx_signed_file)
+
+        # Submit the transaction
+        if not offline:
+            self.submit_transaction(tx_signed_file, cleanup)
+        else:
+            print(f"Signed transaction file saved to: {tx_signed_file}")
 
     def register_stake_address(self, addr, stake_vkey_file, stake_skey_file,
-                               pmt_skey_file, cleanup=True):
+                               pmt_skey_file, offline=False, cleanup=True):
         """Register a stake address in the blockchain.
 
         Parameters
@@ -374,6 +382,10 @@ class ShelleyTools():
             Path to the staking signing key.
         pmt_skey_file : str or Path
             Path to the payment signing key.
+        offline: bool, optional
+            Flag to indicate if the transactions is being generated offline.
+            If true (defaults to false), the transaction file is signed but
+            not sent.
         cleanup : bool, optional
             Flag that indicates if the temporary transaction files should be
             removed when finished (defaults to True).
@@ -386,7 +398,7 @@ class ShelleyTools():
         key_file_path = Path(stake_vkey_file)
         stake_cert_path = key_file_path.parent / (key_file_path.stem + ".cert")
         self.__run(
-            f"{self.cli} shelley stake-address registration-certificate "
+            f"{self.cli} stake-address registration-certificate "
             f"--stake-verification-key-file {stake_vkey_file} "
             f"--out-file {stake_cert_path}"
         )
@@ -420,7 +432,7 @@ class ShelleyTools():
 
             # Build a transaction draft
             self.__run(
-                f"{self.cli} shelley transaction build-raw{tx_in_str} "
+                f"{self.cli} transaction build-raw{tx_in_str} "
                 f"--tx-out {addr}+0 --ttl 0 --fee 0 "
                 f"--certificate-file {stake_cert_path} "
                 f"--out-file {tx_draft_file}"
@@ -447,7 +459,7 @@ class ShelleyTools():
         # Build the transaction.
         tx_raw_file = Path(self.working_dir) / (tx_name + ".raw")
         self.__run(
-            f"{self.cli} shelley transaction build-raw{tx_in_str} "
+            f"{self.cli} transaction build-raw{tx_in_str} "
             f"--tx-out {addr}+{utxo_total - cost} "
             f"--ttl {ttl} --fee {min_fee} "
             f"--certificate-file {stake_cert_path} "
@@ -458,23 +470,22 @@ class ShelleyTools():
         # Sign the transaction with both the payment and stake keys.
         tx_signed_file = Path(self.working_dir) / (tx_name + ".signed")
         self.__run(
-            f"{self.cli} shelley transaction sign "
+            f"{self.cli} transaction sign "
             f"--tx-body-file {tx_raw_file} --signing-key-file {pmt_skey_file} "
             f"--signing-key-file {stake_skey_file} {self.network} "
             f"--out-file {tx_signed_file}"
         )
 
-        # Submit the transaction
-        self.__run(
-            f"{self.cli} shelley transaction submit "
-            f"--tx-file {tx_signed_file} {self.network}"
-        )
-
-        # Delete the transaction files if specified.
+        # Delete the intermediate transaction files if specified.
         if cleanup:
             self.__cleanup_file(tx_draft_file)
             self.__cleanup_file(tx_raw_file)
-            self.__cleanup_file(tx_signed_file)
+
+        # Submit the transaction
+        if not offline:
+            self.submit_transaction(tx_signed_file, cleanup)
+        else:
+            print(f"Signed transaction file saved to: {tx_signed_file}")
 
     def generate_kes_keys(self, pool_name="pool", folder=None) -> (str, str):
         """Generate a new set of KES keys for a stake pool.
@@ -509,7 +520,7 @@ class ShelleyTools():
         kes_vkey = folder / (pool_name + "_kes.vkey")
         kes_skey = folder / (pool_name + "_kes.skey")
         self.__run(
-            f"{self.cli} shelley node key-gen-KES "
+            f"{self.cli} node key-gen-KES "
             f"--verification-key-file {kes_vkey} "
             f"--signing-key-file {kes_skey}"
         )
@@ -556,7 +567,7 @@ class ShelleyTools():
         cold_skey = folder / (pool_name + "_cold.skey")
         cold_counter = folder / (pool_name + "_cold.counter")
         self.__run(
-            f"{self.cli} shelley node key-gen "
+            f"{self.cli} node key-gen "
             f"--cold-verification-key-file {cold_vkey} "
             f"--cold-signing-key-file {cold_skey} "
             f"--operational-certificate-issue-counter-file {cold_counter}"
@@ -566,7 +577,7 @@ class ShelleyTools():
         vrf_vkey = folder / (pool_name + "_vrf.vkey")
         vrf_skey = folder / (pool_name + "_vrf.skey")
         self.__run(
-            f"{self.cli} shelley node key-gen-VRF "
+            f"{self.cli} node key-gen-VRF "
             f"--verification-key-file {vrf_vkey} "
             f"--signing-key-file {vrf_skey}"
         )
@@ -584,7 +595,7 @@ class ShelleyTools():
         tip = self.get_tip()
         kes_period = tip // slots_kes_period  # Integer division
         self.__run(
-            f"{self.cli} shelley node issue-op-cert "
+            f"{self.cli} node issue-op-cert "
             f"--kes-verification-key-file {kes_vkey} "
             f"--cold-signing-key-file {cold_skey} "
             f"--operational-certificate-issue-counter {cold_counter} "
@@ -593,7 +604,7 @@ class ShelleyTools():
 
         # Get the pool ID and return it.
         result = self.__run(
-            f"{self.cli} shelley stake-pool id "
+            f"{self.cli} stake-pool id "
             f"--verification-key-file {cold_vkey}"
         )
         pool_id = result.stdout
@@ -644,7 +655,7 @@ class ShelleyTools():
         tip = self.get_tip()
         kes_period = tip // slots_kes_period  # Integer division
         self.__run(
-            f"{self.cli} shelley node issue-op-cert "
+            f"{self.cli} node issue-op-cert "
             f"--kes-verification-key-file {kes_vkey} "
             f"--cold-signing-key-file {cold_skey} "
             f"--operational-certificate-issue-counter {cold_counter} "
@@ -674,7 +685,7 @@ class ShelleyTools():
             json.dumps(pool_metadata).strip()
         )
         result = self.__run(
-            f"{self.cli} shelley stake-pool metadata-hash "
+            f"{self.cli} stake-pool metadata-hash "
             f"--pool-metadata-file {metadata_file_path}"
         )
         metadata_hash = result.stdout.strip()
@@ -686,7 +697,7 @@ class ShelleyTools():
                             owner_stake_skeys, payment_addr, payment_skey,
                             genesis_file, pool_relays=None,
                             pool_metadata_url=None, pool_metadat_hash=None,
-                            folder=None, cleanup=True):
+                            folder=None, offline=False, cleanup=True):
         """Register a stake pool on the blockchain.
 
         Parameters
@@ -738,6 +749,10 @@ class ShelleyTools():
             download the file from the URL and compute the hash.
         folder : str or Path, optional
             The directory where the generated files/certs will be placed.
+        offline: bool, optional
+            Flag to indicate if the transactions is being generated offline.
+            If true (defaults to false), the transaction file is signed but
+            not sent.
         cleanup : bool, optional
             Flag that indicates if the temporary transaction files should be
             removed when finished (defaults to True).
@@ -762,7 +777,7 @@ class ShelleyTools():
                 metadata_file = folder / "metadata_file_download.json"
                 self.__download_file(pool_metadata_url, metadata_file)
                 result = self.__run(
-                    f"{self.cli} shelley stake-pool metadata-hash "
+                    f"{self.cli} stake-pool metadata-hash "
                     f"--pool-metadata-file {metadata_file}"
                 )
                 pool_metadat_hash = result.stdout.strip()
@@ -802,7 +817,7 @@ class ShelleyTools():
         # Generate Stake pool registration certificate
         pool_cert_path = folder / (pool_name + "_registration.cert")
         self.__run(
-            f"{self.cli} shelley stake-pool registration-certificate "
+            f"{self.cli} stake-pool registration-certificate "
             f"--cold-verification-key-file {pool_cold_vkey} "
             f"--vrf-verification-key-file {pool_vrf_key} "
             f"--pool-pledge {pool_pledge} "
@@ -823,7 +838,7 @@ class ShelleyTools():
             cert_path = key_path.parent / (key_path.stem + "_delegation.cert")
             del_cert_args += f"--certificate-file {cert_path} "
             self.__run(
-                f"{self.cli} shelley stake-address delegation-certificate "
+                f"{self.cli} stake-address delegation-certificate "
                 f"--stake-verification-key-file {key_path} "
                 f"--cold-verification-key-file {pool_cold_vkey} "
                 f"--out-file {cert_path}"
@@ -864,7 +879,7 @@ class ShelleyTools():
 
             # Build a transaction draft
             self.__run(
-                f"{self.cli} shelley transaction build-raw{tx_in_str} "
+                f"{self.cli} transaction build-raw{tx_in_str} "
                 f"--tx-out {payment_addr}+0 --ttl 0 --fee 0 "
                 f"--out-file {tx_draft_file} "
                 f"--certificate-file {pool_cert_path} {del_cert_args}"
@@ -894,7 +909,7 @@ class ShelleyTools():
         # certificate(s) to the blockchain.
         tx_raw_file = Path(self.working_dir) / (tx_name + ".raw")
         self.__run(
-            f"{self.cli} shelley transaction build-raw{tx_in_str} "
+            f"{self.cli} transaction build-raw{tx_in_str} "
             f"--tx-out {payment_addr}+{utxo_total - min_fee - pool_deposit} "
             f"--ttl {ttl} --fee {min_fee} --out-file {tx_raw_file} "
             f"--certificate-file {pool_cert_path} {del_cert_args}"
@@ -903,23 +918,22 @@ class ShelleyTools():
         # Sign the transaction with both the payment and stake keys.
         tx_signed_file = Path(self.working_dir) / (tx_name + ".signed")
         self.__run(
-            f"{self.cli} shelley transaction sign "
+            f"{self.cli} transaction sign "
             f"--tx-body-file {tx_raw_file} --signing-key-file {payment_skey} "
             f"{signing_key_args} --signing-key-file {pool_cold_skey} "
             f"{self.network} --out-file {tx_signed_file}"
-        )
-
-        # Submit the transaction
-        self.__run(
-            f"{self.cli} shelley transaction submit "
-            f"--tx-file {tx_signed_file} {self.network}"
         )
 
         # Delete the transaction files if specified.
         if cleanup:
             self.__cleanup_file(tx_draft_file)
             self.__cleanup_file(tx_raw_file)
-            self.__cleanup_file(tx_signed_file)
+
+        # Submit the transaction
+        if not offline:
+            self.submit_transaction(tx_signed_file, cleanup)
+        else:
+            print(f"Signed transaction file saved to: {tx_signed_file}")
 
     def update_stake_pool_registration(self, pool_name, pool_pledge, pool_cost,
                             pool_margin, pool_cold_vkey, pool_cold_skey,
@@ -927,7 +941,7 @@ class ShelleyTools():
                             owner_stake_skeys, payment_addr, payment_skey,
                             genesis_file, pool_relays=None,
                             pool_metadata_url=None, pool_metadat_hash=None,
-                            folder=None, cleanup=True):
+                            folder=None, offline=False, cleanup=True):
         """Update an existing stake pool registration on the blockchain.
 
         Parameters
@@ -979,6 +993,10 @@ class ShelleyTools():
             download the file from the URL and compute the hash.
         folder : str, Path, optional
             The directory where the generated files/certs will be placed.
+        offline: bool, optional
+            Flag to indicate if the transactions is being generated offline.
+            If true (defaults to false), the transaction file is signed but
+            not sent.
         cleanup : bool, optional
             Flag that indicates if the temporary transaction files should be
             removed when finished (defaults to True).
@@ -1003,7 +1021,7 @@ class ShelleyTools():
                 metadata_file = folder / "metadata_file_download.json"
                 self.__download_file(pool_metadata_url, metadata_file)
                 result = self.__run(
-                    f"{self.cli} shelley stake-pool metadata-hash "
+                    f"{self.cli} stake-pool metadata-hash "
                     f"--pool-metadata-file {metadata_file}"
                 )
                 pool_metadat_hash = result.stdout.strip()
@@ -1044,7 +1062,7 @@ class ShelleyTools():
         # Generate Stake pool registration certificate
         pool_cert_path = folder / (pool_name + "_registration.cert")
         self.__run(
-            f"{self.cli} shelley stake-pool registration-certificate "
+            f"{self.cli} stake-pool registration-certificate "
             f"--cold-verification-key-file {pool_cold_vkey} "
             f"--vrf-verification-key-file {pool_vrf_key} "
             f"--pool-pledge {pool_pledge} "
@@ -1065,7 +1083,7 @@ class ShelleyTools():
             cert_path = key_path.parent / (key_path.stem + "_delegation.cert")
             del_cert_args += f"--certificate-file {cert_path} "
             self.__run(
-                f"{self.cli} shelley stake-address delegation-certificate "
+                f"{self.cli} stake-address delegation-certificate "
                 f"--stake-verification-key-file {key_path} "
                 f"--cold-verification-key-file {pool_cold_vkey} "
                 f"--out-file {cert_path}"
@@ -1103,7 +1121,7 @@ class ShelleyTools():
 
             # Build a transaction draft
             self.__run(
-                f"{self.cli} shelley transaction build-raw{tx_in_str} "
+                f"{self.cli} transaction build-raw{tx_in_str} "
                 f"--tx-out {payment_addr}+0 --ttl 0 --fee 0 "
                 f"--out-file {tx_draft_file} "
                 f"--certificate-file {pool_cert_path} {del_cert_args}"
@@ -1130,7 +1148,7 @@ class ShelleyTools():
         # certificate(s) to the blockchain.
         tx_raw_file = Path(self.working_dir) / (tx_name + ".raw")
         self.__run(
-            f"{self.cli} shelley transaction build-raw{tx_in_str} "
+            f"{self.cli} transaction build-raw{tx_in_str} "
             f"--tx-out {payment_addr}+{utxo_total - min_fee - pool_deposit} "
             f"--ttl {ttl} --fee {min_fee} --out-file {tx_raw_file} "
             f"--certificate-file {pool_cert_path} {del_cert_args}"
@@ -1139,23 +1157,22 @@ class ShelleyTools():
         # Sign the transaction with both the payment and stake keys.
         tx_signed_file = Path(self.working_dir) / (tx_name + ".signed")
         self.__run(
-            f"{self.cli} shelley transaction sign "
+            f"{self.cli} transaction sign "
             f"--tx-body-file {tx_raw_file} --signing-key-file {payment_skey} "
             f"{signing_key_args} --signing-key-file {pool_cold_skey} "
             f"{self.network} --out-file {tx_signed_file}"
-        )
-
-        # Submit the transaction
-        self.__run(
-            f"{self.cli} shelley transaction submit "
-            f"--tx-file {tx_signed_file} {self.network}"
         )
 
         # Delete the transaction files if specified.
         if cleanup:
             self.__cleanup_file(tx_draft_file)
             self.__cleanup_file(tx_raw_file)
-            self.__cleanup_file(tx_signed_file)
+
+        # Submit the transaction
+        if not offline:
+            self.submit_transaction(tx_signed_file, cleanup)
+        else:
+            print(f"Signed transaction file saved to: {tx_signed_file}")
 
     def retire_stake_pool(self, remaining_epochs, genesis_file, cold_vkey,
                           cold_skey, payment_skey, payment_addr, cleanup=True):
@@ -1217,7 +1234,7 @@ class ShelleyTools():
         # Create deregistration certificate
         pool_dereg = self.working_dir / "pool.dereg"
         self.__run(
-            f"{self.cli} shelley stake-pool deregistration-certificate "
+            f"{self.cli} stake-pool deregistration-certificate "
             f"--cold-verification-key-file {cold_vkey} "
             f"--epoch {epoch + remaining_epochs} --out-file {pool_dereg}"
         )
@@ -1238,7 +1255,7 @@ class ShelleyTools():
 
             # Build a transaction draft
             self.__run(
-                f"{self.cli} shelley transaction build-raw{tx_in_str} "
+                f"{self.cli} transaction build-raw{tx_in_str} "
                 f"--tx-out {payment_addr}+0 --ttl 0 --fee 0 "
                 f"--out-file {tx_draft_file} --certificate-file {pool_dereg}"
             )
@@ -1262,7 +1279,7 @@ class ShelleyTools():
         # Build the raw transaction
         tx_raw_file = self.working_dir / "pool_dereg_tx.raw"
         self.__run(
-            f"{self.cli} shelley transaction build-raw{tx_in_str} "
+            f"{self.cli} transaction build-raw{tx_in_str} "
             f"--tx-out {payment_addr}+{utxo_total - min_fee} --ttl {ttl} "
             f"--fee {min_fee} --out-file {tx_raw_file} "
             f"--certificate-file {pool_dereg}"
@@ -1271,7 +1288,7 @@ class ShelleyTools():
         # Sign it with both the payment signing key and the cold signing key.
         tx_signed_file = self.working_dir / "pool_dereg_tx.signed"
         self.__run(
-            f"{self.cli} shelley transaction sign "
+            f"{self.cli} transaction sign "
             f"--tx-body-file {tx_raw_file} "
             f"--signing-key-file {payment_skey} "
             f"--signing-key-file {cold_skey} "
@@ -1280,7 +1297,7 @@ class ShelleyTools():
 
         # Submit the transaction
         self.__run(
-            f"{self.cli} shelley transaction submit "
+            f"{self.cli} transaction submit "
             f"--tx-file {tx_signed_file} {self.network}"
         )
 
@@ -1304,14 +1321,14 @@ class ShelleyTools():
             The stake pool id.
         """
         result = self.__run(
-            f"{self.cli} shelley stake-pool id "
+            f"{self.cli} stake-pool id "
             f"--verification-key-file {cold_vkey}"
         )
         pool_id = result.stdout
         return pool_id
 
     def claim_staking_rewards(self, stake_addr, stake_skey, receive_addr, 
-        payment_skey, payment_addr=None, cleanup=True):
+        payment_skey, payment_addr=None, offline=False, cleanup=True):
         """Withdraw staking address rewards to a spending address.
 
         Thanks to @ATADA_Stakepool who's scripts greatly influenced the 
@@ -1329,6 +1346,10 @@ class ShelleyTools():
             Path to the signing key for the account paying the tx fees.
         payment_addr : str, optional
             Optionally use a second account to pay the tx fees.
+        offline: bool, optional
+            Flag to indicate if the transactions is being generated offline.
+            If true (defaults to false), the transaction file is signed but
+            not sent.
         cleanup : bool, optional
             Flag that indicates if the temporary transaction files should be
             removed when finished (defaults to True).
@@ -1349,7 +1370,7 @@ class ShelleyTools():
         if len(utxos) < 1:
             raise ShelleyError(
                 f"Transaction failed due to insufficient funds. "
-                f"Account {addr} cannot pay tranction costs because "
+                f"Account {payment_addr} cannot pay tranction costs because "
                 "it does not contain any ADA."
             )
         utxos.sort(key=lambda k: k["Lovelace"], reverse=True)
@@ -1378,7 +1399,7 @@ class ShelleyTools():
             if payment_addr == receive_addr:
                 # Build a transaction draft
                 self.__run(
-                    f"{self.cli} shelley transaction build-raw{tx_in_str} "
+                    f"{self.cli} transaction build-raw{tx_in_str} "
                     f"--tx-out {receive_addr}+0 --ttl 0 --fee 0 "
                     f"--withdrawal {withdrawal_str} --out-file {tx_draft_file}"
                 )
@@ -1391,7 +1412,7 @@ class ShelleyTools():
             else:
                 # Build a transaction draft
                 self.__run(
-                    f"{self.cli} shelley transaction build-raw{tx_in_str} "
+                    f"{self.cli} transaction build-raw{tx_in_str} "
                     f"--tx-out {receive_addr}+0 --tx-out {payment_addr}+0 "
                     f"--ttl 0 --fee 0 --withdrawal {withdrawal_str} "
                     f"--out-file {tx_draft_file}"
@@ -1420,7 +1441,7 @@ class ShelleyTools():
         if payment_addr == receive_addr:  
             # If the address receiving the funds is also paying the TX fee.  
             self.__run(
-                f"{self.cli} shelley transaction build-raw{tx_in_str} "
+                f"{self.cli} transaction build-raw{tx_in_str} "
                 f"--tx-out {receive_addr}+{utxo_total - min_fee + rewards} "
                 f"--ttl {ttl} --fee {min_fee} --withdrawal {withdrawal_str} "
                 f"--out-file {tx_raw_file}"
@@ -1428,7 +1449,7 @@ class ShelleyTools():
         else:
             # If another address is paying the TX fee.
             self.__run(
-                f"{self.cli} shelley transaction build-raw{tx_in_str} "
+                f"{self.cli} transaction build-raw{tx_in_str} "
                 f"--tx-out {payment_addr}+{utxo_total - min_fee} "
                 f"--tx-out {receive_addr}+{rewards} "
                 f"--ttl {ttl} --fee {min_fee} --withdrawal {withdrawal_str} "
@@ -1438,23 +1459,22 @@ class ShelleyTools():
         # Sign the transaction with both the payment and stake keys.
         tx_signed_file = Path(self.working_dir) / (tx_name + ".signed")
         self.__run(
-            f"{self.cli} shelley transaction sign "
+            f"{self.cli} transaction sign "
             f"--tx-body-file {tx_raw_file} --signing-key-file {payment_skey} "
             f"--signing-key-file {stake_skey} {self.network} "
             f"--out-file {tx_signed_file}"
         )
 
-        # Submit the transaction
-        self.__run(
-            f"{self.cli} shelley transaction submit "
-            f"--tx-file {tx_signed_file} {self.network}"
-        )
-
-        # Delete the transaction files if specified.
+        # Delete the intermediate transaction files if specified.
         if cleanup:
             self.__cleanup_file(tx_draft_file)
             self.__cleanup_file(tx_raw_file)
-            self.__cleanup_file(tx_signed_file)
+
+        # Submit the transaction
+        if not offline:
+            self.submit_transaction(tx_signed_file, cleanup)
+        else:
+            print(f"Signed transaction file saved to: {tx_signed_file}")
 
     def convert_itn_keys(self, itn_prv_key, itn_pub_key, folder=None) -> str:
         """Convert ITN account keys to Shelley staking keys.
@@ -1497,19 +1517,19 @@ class ShelleyTools():
         skey_file = folder / (Path(itn_prv_key).stem + "_shelley_staking.skey")
         if prvkey[:8] == "ed25519e":
             self.__run(
-                f"{self.cli} shelley key convert-itn-extended-key "
+                f"{self.cli} key convert-itn-extended-key "
                 f"--itn-signing-key-file {itn_prv_key} "
                 f"--out-file {skey_file}"
             )
         elif prvkey[:8] == "ed25519b":
             self.__run(
-                f"{self.cli} shelley key convert-itn-bip32-key "
+                f"{self.cli} key convert-itn-bip32-key "
                 f"--itn-signing-key-file {itn_prv_key} "
                 f"--out-file {skey_file}"
             )
         elif prvkey[:7] == "ed25519":
             self.__run(
-                f"{self.cli} shelley key convert-itn-key "
+                f"{self.cli} key convert-itn-key "
                 f"--itn-signing-key-file {itn_prv_key} "
                 f"--out-file {skey_file}"
             )
@@ -1519,7 +1539,7 @@ class ShelleyTools():
         # Convert the public key
         vkey_file = folder / (Path(itn_pub_key).stem + "_shelley_staking.vkey")
         self.__run(
-            f"{self.cli} shelley key convert-itn-key "
+            f"{self.cli} key convert-itn-key "
             f"--itn-verification-key-file {itn_pub_key} "
             f"--out-file {vkey_file}"
         )
@@ -1527,7 +1547,7 @@ class ShelleyTools():
         # Create the staking address
         addr_file = folder / (Path(itn_pub_key).stem + "_shelley_staking.addr")
         self.__run(
-            f"{self.cli} shelley stake-address build "
+            f"{self.cli} stake-address build "
             f"--stake-verification-key-file {vkey_file} "
             f"--out-file {addr_file} {self.network}"
         )
@@ -1550,8 +1570,8 @@ class ShelleyTools():
             Rewards balance in lovelaces. 
         """
         result = self.__run(
-            f"{self.cli} shelley query stake-address-info "
-            f"--address {stake_addr} {self.network}"
+            f"{self.cli} query stake-address-info --address "
+            f"{stake_addr} {self.network} {self.era}"
         )
         if "Failed" in result.stdout:
             raise ShelleyError(result.stdout)
@@ -1560,6 +1580,29 @@ class ShelleyTools():
         info = json.loads(result.stdout)
         balance = sum(b["rewardAccountBalance"] for b in info)
         return balance
+
+    def submit_transaction(self, signed_tx_file, cleanup=False):
+        """Submit a transaction to the blockchain. This function is separate to
+        enable the submissions of transactions signed by offline keys.
+        
+        Parameters
+        ----------
+        signed_tx_file : str or Path
+            Path to the signed transaction file ready for submission.
+        cleanup : bool, optional
+            Flag that indicates if the temporary transaction files should be
+            removed when finished (defaults to false).
+        """
+
+        # Submit the transaction
+        self.__run(
+            f"{self.cli} transaction submit "
+            f"--tx-file {signed_tx_file} {self.network}"
+        )
+
+        # Delete the transaction files if specified.
+        if cleanup:
+            self.__cleanup_file(signed_tx_file)
 
 
 if __name__ == "__main__":
