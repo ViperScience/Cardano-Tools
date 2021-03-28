@@ -4,6 +4,7 @@ from pathlib import Path
 import subprocess
 import requests
 import json
+import sys
 import os
 
 
@@ -11,11 +12,17 @@ class ShelleyError(Exception):
     pass
 
 
-class ShelleyTools():
-
-    def __init__(self, path_to_cli, path_to_socket, working_dir,
-                 ttl_buffer=1000, ssh=None, network="--mainnet",
-                 era="--allegra-era"):
+class ShelleyTools:
+    def __init__(
+        self,
+        path_to_cli,
+        path_to_socket,
+        working_dir,
+        ttl_buffer=1000,
+        ssh=None,
+        network="--mainnet",
+        era="--mary-era",
+    ):
 
         # Debug flag -- may be set after object initialization.
         self.debug = False
@@ -38,7 +45,7 @@ class ShelleyTools():
         if self.ssh is None:
             self.working_dir.mkdir(parents=True, exist_ok=True)
         else:
-            self.__run(f"mkdir -p \"{self.working_dir}\"")
+            self.__run(f'mkdir -p "{self.working_dir}"')
 
         self.ttl_buffer = ttl_buffer
         self.network = network
@@ -53,10 +60,10 @@ class ShelleyTools():
             # Run the commands remotely
             cmd = f"export CARDANO_NODE_SOCKET_PATH={self.socket}; " + cmd
             if self.debug:
-                print(f"CMD: \"{cmd}\"")
+                print(f'CMD: "{cmd}"')
                 result = self.ssh.run(cmd, warn=True)
-                print(f"stdout: \"{result.stdout}\"")
-                print(f"stderr: \"{result.stderr}\"")
+                print(f'stdout: "{result.stdout}"')
+                print(f'stderr: "{result.stderr}"')
             else:
                 result = self.ssh.run(cmd, warn=True, hide=True)
             stdout = result.stdout.strip()
@@ -72,9 +79,9 @@ class ShelleyTools():
             stdout = result.stdout.decode().strip()
             stderr = result.stderr.decode().strip()
             if self.debug:
-                print(f"CMD: \"{cmd}\"")
-                print(f"stdout: \"{stdout}\"")
-                print(f"stderr: \"{stderr}\"")
+                print(f'CMD: "{cmd}"')
+                print(f'stdout: "{stdout}"')
+                print(f'stderr: "{stderr}"')
 
         ResultType = namedtuple("Result", "stdout, stderr")
         return ResultType(stdout, stderr)
@@ -92,7 +99,7 @@ class ShelleyTools():
             self.ssh.close()
 
         else:
-            text = open(fpath, 'r').read()
+            text = open(fpath, "r").read()
 
         return text
 
@@ -101,9 +108,9 @@ class ShelleyTools():
 
             # Run the commands remotely
             self.ssh.open()  # Open the connection
-            cmd = f"printf \"%s\" \'{datastr}\' > \"{fpath}\""
+            cmd = f'printf "%s" \'{datastr}\' > "{fpath}"'
             self.ssh.run(cmd, warn=True, hide=True)
-            self.ssh.close()   # Close the connection
+            self.ssh.close()  # Close the connection
 
         else:
             with open(fpath, "w") as outfile:
@@ -116,11 +123,11 @@ class ShelleyTools():
             self.ssh.open()  # Open the connection
             cmd = f"curl -sSL {url} -o {fpath}"
             self.ssh.run(cmd, warn=True, hide=True)
-            self.ssh.close()   # Close the connection
+            self.ssh.close()  # Close the connection
 
         else:
             download = requests.get(url)
-            with open(fpath, 'wb') as download_file:
+            with open(fpath, "wb") as download_file:
                 download_file.write(download.content)
 
     def __cleanup_file(self, fpath):
@@ -167,7 +174,7 @@ class ShelleyTools():
         if self.ssh is None:
             folder.mkdir(parents=True, exist_ok=True)
         else:
-            self.__run(f"mkdir -p \"{folder}\"")
+            self.__run(f'mkdir -p "{folder}"')
         payment_vkey = folder / (name + ".vkey")
         payment_skey = folder / (name + ".skey")
         stake_vkey = folder / (name + "_stake.vkey")
@@ -215,15 +222,13 @@ class ShelleyTools():
         result = self.__run(
             f"{self.cli} query utxo --address {addr} {self.network} {self.era}"
         )
-        raw_utxos = result.stdout.split('\n')[2:]
+        raw_utxos = result.stdout.split("\n")[2:]
         utxos = []
         for utxo_line in raw_utxos:
             vals = utxo_line.split()
-            utxos.append({
-                "TxHash": vals[0],
-                "TxIx": vals[1],
-                "Lovelace": vals[2]
-            })
+            utxos.append(
+                {"TxHash": vals[0], "TxIx": vals[1], "Lovelace": vals[2]}
+            )
         return utxos
 
     def query_balance(self, addr) -> int:
@@ -235,8 +240,14 @@ class ShelleyTools():
             total += int(utxo["Lovelace"])
         return total
 
-    def calc_min_fee(self, tx_draft, tx_in_count, tx_out_count, witness_count,
-                     byron_witness_count=0) -> int:
+    def calc_min_fee(
+        self,
+        tx_draft,
+        tx_in_count,
+        tx_out_count,
+        witness_count,
+        byron_witness_count=0,
+    ) -> int:
         """Calculate the minimum fee in lovelaces for the transaction.
 
         Parameters
@@ -251,6 +262,11 @@ class ShelleyTools():
             The number of transaction signing keys.
         byron_witness_count : int, optional
             Number of Byron witnesses (defaults to 0).
+        
+        Returns
+        -------
+        int
+            The minimum fee in lovelaces.
         """
         params_file = self.load_protocol_parameters()
         result = self.__run(
@@ -265,8 +281,9 @@ class ShelleyTools():
         min_fee = int(result.stdout.split()[0])
         return min_fee
 
-    def send_payment(self, amt, to_addr, from_addr, key_file, offline=False,
-                     cleanup=True):
+    def send_payment(
+        self, amt, to_addr, from_addr, key_file, offline=False, cleanup=True
+    ):
         """Send ADA from one address to another.
 
         Parameters
@@ -287,7 +304,7 @@ class ShelleyTools():
             Flag that indicates if the temporary transaction files should be
             removed when finished (defaults to True).
         """
-        payment = amt*1_000_000  # ADA to Lovelaces
+        payment = amt * 1_000_000  # ADA to Lovelaces
 
         # Build a transaction name
         tx_name = datetime.now().strftime("%Y-%m-%d_%Hh%Mm%Ss")
@@ -305,7 +322,7 @@ class ShelleyTools():
         for count, utxo in enumerate(utxos):
 
             utxo_count = count + 1
-            utxo_total += int(utxo['Lovelace'])
+            utxo_total += int(utxo["Lovelace"])
             tx_in_str += f" --tx-in {utxo['TxHash']}#{utxo['TxIx']}"
             if utxo_total < payment:
                 continue
@@ -318,13 +335,14 @@ class ShelleyTools():
             )
 
             # Calculate the minimum fee
-            min_fee = self.calc_min_fee(tx_draft_file, utxo_count,
-                                        tx_out_count=2, witness_count=1)
+            min_fee = self.calc_min_fee(
+                tx_draft_file, utxo_count, tx_out_count=2, witness_count=1
+            )
 
             if utxo_total > (payment + min_fee):
                 break
 
-        total_lovelace_out = (payment + min_fee)
+        total_lovelace_out = payment + min_fee
         if utxo_total < total_lovelace_out:
             raise ShelleyError(
                 f"Transaction failed due to insufficient funds. "
@@ -368,8 +386,15 @@ class ShelleyTools():
         else:
             print(f"Signed transaction file saved to: {tx_signed_file}")
 
-    def register_stake_address(self, addr, stake_vkey_file, stake_skey_file,
-                               pmt_skey_file, offline=False, cleanup=True):
+    def register_stake_address(
+        self,
+        addr,
+        stake_vkey_file,
+        stake_skey_file,
+        pmt_skey_file,
+        offline=False,
+        cleanup=True,
+    ):
         """Register a stake address in the blockchain.
 
         Parameters
@@ -427,7 +452,7 @@ class ShelleyTools():
         tx_in_str = ""
         for idx, utxo in enumerate(utxos):
             utxo_count = idx + 1
-            utxo_total += int(utxo['Lovelace'])
+            utxo_total += int(utxo["Lovelace"])
             tx_in_str += f" --tx-in {utxo['TxHash']}#{utxo['TxIx']}"
 
             # Build a transaction draft
@@ -439,8 +464,9 @@ class ShelleyTools():
             )
 
             # Calculate the minimum fee
-            min_fee = self.calc_min_fee(tx_draft_file, utxo_count,
-                                        tx_out_count=1, witness_count=2)
+            min_fee = self.calc_min_fee(
+                tx_draft_file, utxo_count, tx_out_count=1, witness_count=2
+            )
 
             # TX cost
             cost = min_fee + self.protocol_parameters["keyDeposit"]
@@ -448,8 +474,8 @@ class ShelleyTools():
                 break
 
         if utxo_total < cost:
-            cost_ada = cost/1_000_000
-            utxo_total_ada = utxo_total/1_000_000
+            cost_ada = cost / 1_000_000
+            utxo_total_ada = utxo_total / 1_000_000
             raise ShelleyError(
                 f"Transaction failed due to insufficient funds. "
                 f"Account {addr} cannot pay tranction costs of {cost_ada} "
@@ -464,7 +490,6 @@ class ShelleyTools():
             f"--ttl {ttl} --fee {min_fee} "
             f"--certificate-file {stake_cert_path} "
             f"--out-file {tx_raw_file}"
-
         )
 
         # Sign the transaction with both the payment and stake keys.
@@ -514,7 +539,7 @@ class ShelleyTools():
             if self.ssh is None:
                 folder.mkdir(parents=True, exist_ok=True)
             else:
-                self.__run(f"mkdir -p \"{folder}\"")
+                self.__run(f'mkdir -p "{folder}"')
 
         # Generate the KES Key pair
         kes_vkey = folder / (pool_name + "_kes.vkey")
@@ -527,8 +552,9 @@ class ShelleyTools():
 
         return (kes_vkey, kes_skey)
 
-    def create_block_producing_keys(self, genesis_file, pool_name="pool",
-                                    folder=None):
+    def create_block_producing_keys(
+        self, genesis_file, pool_name="pool", folder=None
+    ):
         """Create keys for a block-producing node.
         WARNING: You may want to use your local machine for this process
         (assuming you have cardano-node and cardano-cli on it). Make sure you
@@ -560,7 +586,7 @@ class ShelleyTools():
             if self.ssh is None:
                 folder.mkdir(parents=True, exist_ok=True)
             else:
-                self.__run(f"mkdir -p \"{folder}\"")
+                self.__run(f'mkdir -p "{folder}"')
 
         # Generate Cold Keys and a Cold_counter
         cold_vkey = folder / (pool_name + "_cold.vkey")
@@ -604,16 +630,21 @@ class ShelleyTools():
 
         # Get the pool ID and return it.
         result = self.__run(
-            f"{self.cli} stake-pool id "
-            f"--verification-key-file {cold_vkey}"
+            f"{self.cli} stake-pool id " f"--verification-key-file {cold_vkey}"
         )
         pool_id = result.stdout
         self.__dump_text_file(folder / (pool_name + ".id"), pool_id)
 
         return pool_id  # Return the pool id after first saving it to a file.
 
-    def update_kes_keys(self, genesis_file, cold_skey, cold_counter,
-                        pool_name="pool", folder=None):
+    def update_kes_keys(
+        self,
+        genesis_file,
+        cold_skey,
+        cold_counter,
+        pool_name="pool",
+        folder=None,
+    ):
         """Update KES keys for an existing stake pool.
 
         Parameters
@@ -639,7 +670,7 @@ class ShelleyTools():
             if self.ssh is None:
                 folder.mkdir(parents=True, exist_ok=True)
             else:
-                self.__run(f"mkdir -p \"{folder}\"")
+                self.__run(f'mkdir -p "{folder}"')
 
         # Generate the new KES key pair
         kes_vkey, kes_skey = self.generate_kes_keys(pool_name, folder)
@@ -675,14 +706,13 @@ class ShelleyTools():
             if self.ssh is None:
                 folder.mkdir(parents=True, exist_ok=True)
             else:
-                self.__run(f"mkdir -p \"{folder}\"")
+                self.__run(f'mkdir -p "{folder}"')
 
         # Create a JSON file with the pool metadata and return the file hash.
         ticker = pool_metadata["ticker"]
         metadata_file_path = folder / f"{ticker}_metadata.json"
         self.__dump_text_file(
-            metadata_file_path,
-            json.dumps(pool_metadata).strip()
+            metadata_file_path, json.dumps(pool_metadata).strip()
         )
         result = self.__run(
             f"{self.cli} stake-pool metadata-hash "
@@ -691,13 +721,452 @@ class ShelleyTools():
         metadata_hash = result.stdout.strip()
         return metadata_hash
 
-    def register_stake_pool(self, pool_name, pool_pledge, pool_cost,
-                            pool_margin, pool_cold_vkey, pool_cold_skey,
-                            pool_vrf_key, pool_reward_vkey, owner_stake_vkeys,
-                            owner_stake_skeys, payment_addr, payment_skey,
-                            genesis_file, pool_relays=None,
-                            pool_metadata_url=None, pool_metadat_hash=None,
-                            folder=None, offline=False, cleanup=True):
+    def generate_stake_pool_cert(
+        self,
+        pool_name,
+        pool_pledge,
+        pool_cost,
+        pool_margin,
+        pool_cold_vkey,
+        pool_vrf_key,
+        pool_reward_vkey,
+        owner_stake_vkeys,
+        pool_relays=None,
+        pool_metadata_url=None,
+        pool_metadata_hash=None,
+        folder=None,
+    ) -> str:
+        """Generate a stake pool certificate.
+
+        This function generates a stake pool registration certificate. It can 
+        be used without connection to a running node for offline applications.
+
+        Parameters
+        ----------
+        pool_name : str
+            Pool name for file/certificate naming.
+        pool_metadata : dict
+            Dictionary of stake pool metadata to be converted to json.
+        pool_pledge : int
+            Pool pledge amount in lovelace.
+        pool_cost : int
+            Pool cost (fixed fee per epoch) in lovelace.
+        pool_margin : float
+            Pool margin (variable fee) as a percentage.
+        pool_cold_vkey : str or Path
+            Path to the pool's cold verification key.
+        pool_vrf_key : str or Path
+            Path to the pool's verification key.
+        pool_reward_vkey : str or Path
+            Path to the staking verification key that will receive pool
+            rewards.
+        owner_stake_vkeys : list
+            List of owner stake verification keys (paths) responsible for the
+            pledge.
+        pool_relays: list, optional,
+            List of dictionaries each representing a pool relay. The
+            dictionaries have three required keys:
+                "port" specifying the relay's port number,
+                "host" specifying the host name (IP, DNS, etc.),
+                "host-type" specifying the type of data in the "host" key.
+        pool_metadata_url : str, optional
+            URL to the pool's metadata JSON file.
+        pool_metadata_hash : str, optional
+            Optionally specify the hash of the metadata JSON file. If this is
+            not specified and the pool_metadata_hash is, then the code will
+            download the file from the URL and compute the hash.
+        folder : str or Path, optional
+            The directory where the generated files/certs will be placed.
+        
+        Returns
+        -------
+        str
+            The path to the stake pool registration certificate file.
+        """
+        # Get a working directory to store the generated files and make sure
+        # the directory exists.
+        if folder is None:
+            folder = self.working_dir
+        else:
+            folder = Path(folder)
+            if self.ssh is None:
+                folder.mkdir(parents=True, exist_ok=True)
+            else:
+                self.__run(f'mkdir -p "{folder}"')
+
+        # Get the hash of the JSON file if the URL is provided and the hash is
+        # not specified.
+        metadata_args = ""
+        if pool_metadata_url is not None:
+            if pool_metadata_hash is None:
+                metadata_file = folder / "metadata_file_download.json"
+                self.__download_file(pool_metadata_url, metadata_file)
+                result = self.__run(
+                    f"{self.cli} stake-pool metadata-hash "
+                    f"--pool-metadata-file {metadata_file}"
+                )
+                pool_metadata_hash = result.stdout.strip()
+
+            # Create the arg string for the pool cert.
+            metadata_args = (
+                f"--metadata-url {pool_metadata_url} "
+                f"--metadata-hash {pool_metadata_hash}"
+            )
+
+        # Create the relay arg string. Basically, we need a port and host arg
+        # but there can be different forms of the host argument. See the
+        # caradno-cli documentation. The simpliest way I could figure was to
+        # use a list of dictionaries where each dict represents a relay.
+        relay_args = ""
+        for relay in pool_relays:
+            if "ipv4" in relay["host-type"]:
+                host_arg = f"--pool-relay-ipv4 {relay['host']}"
+            elif "ipv6" in relay["host-type"]:
+                host_arg = f"--pool-relay-ipv4 {relay['host']}"
+            elif "single" in relay["host-type"]:
+                host_arg = f"--single-host-pool-relay {relay['host']}"
+            elif "multi" in relay["host-type"]:
+                relay_args += f"--multi-host-pool-relay {relay['host']}"
+                continue  # No port info for this case
+            else:
+                continue  # Skip if invalid host type
+            port_arg = f"--pool-relay-port {relay['port']}"
+            relay_args += f"{host_arg} {port_arg} "
+
+        # Create the argument string for the list of owner verification keys.
+        owner_vkey_args = ""
+        for key_path in owner_stake_vkeys:
+            arg = f"--pool-owner-stake-verification-key-file {key_path} "
+            owner_vkey_args += arg
+
+        # Generate Stake pool registration certificate
+        ts = datetime.now().strftime("tx_%Y-%m-%d_%Hh%Mm%Ss")
+        pool_cert_path = folder / (pool_name + "_registration_" + ts + ".cert")
+        self.__run(
+            f"{self.cli} stake-pool registration-certificate "
+            f"--cold-verification-key-file {pool_cold_vkey} "
+            f"--vrf-verification-key-file {pool_vrf_key} "
+            f"--pool-pledge {pool_pledge} "
+            f"--pool-cost {pool_cost} "
+            f"--pool-margin {pool_margin/100} "
+            f"--pool-reward-account-verification-key-file {pool_reward_vkey} "
+            f"{owner_vkey_args} {relay_args} {metadata_args} "
+            f"{self.network} --out-file {pool_cert_path}"
+        )
+
+        # Return the path to the generated pool cert
+        return pool_cert_path
+
+    def generate_delegation_cert(
+        self, owner_stake_vkeys, pool_cold_vkey, folder=None
+    ):
+        """Generate a delegation certificate for pledging.
+
+        Parameters
+        ----------
+        owner_stake_vkeys : list
+            List of owner stake verification keys (paths) responsible for the
+            pledge.
+        pool_cold_vkey : str or Path
+            Path to the pool's cold verification key.
+        folder : str or Path, optional
+            The directory where the generated files/certs will be placed.
+        """
+
+        # Get a working directory to store the generated files and make sure
+        # the directory exists.
+        if folder is None:
+            folder = self.working_dir
+        else:
+            folder = Path(folder)
+            if self.ssh is None:
+                folder.mkdir(parents=True, exist_ok=True)
+            else:
+                self.__run(f'mkdir -p "{folder}"')
+
+        # Generate delegation certificate (pledge from each owner)
+        ts = datetime.now().strftime("tx_%Y-%m-%d_%Hh%Mm%Ss")
+        certs = []
+        for key_path in owner_stake_vkeys:
+            key_path = Path(key_path)
+            cert_path = key_path.parent / (
+                key_path.stem + "_delegation_" + ts + ".cert"
+            )
+            self.__run(
+                f"{self.cli} stake-address delegation-certificate "
+                f"--stake-verification-key-file {key_path} "
+                f"--cold-verification-key-file {pool_cold_vkey} "
+                f"--out-file {cert_path}"
+            )
+            certs.append(cert_path)
+
+        # Return a list of certificate files
+        return certs
+
+    def build_raw_transaction(
+        self,
+        payment_addr,
+        witness_count=1,
+        receive_addrs=None,
+        payments=None,
+        certs=None,
+        deposits=0,
+        folder=None,
+    ) -> str:
+        """
+
+        Requires a running and synced node.
+
+        Parameters
+        ----------
+        payment_addr : str
+            Address to pay the fees, deposites, and payments.
+        receive_addrs : list, optional
+            Address to receive payment.
+        payments: list, optional
+            Payments corresponding to the list of receive addresses.
+        certs: list, optional
+            List of certificate files to include in the transaction.
+        deposits: int, optional
+            Deposits
+        
+        Returns
+        -------
+        str
+            Resturns the path to the raw transaction file.
+        """
+
+        # Get a working directory to store the generated files and make sure
+        # the directory exists.
+        if folder is None:
+            folder = self.working_dir
+        else:
+            folder = Path(folder)
+            if self.ssh is None:
+                folder.mkdir(parents=True, exist_ok=True)
+            else:
+                self.__run(f'mkdir -p "{folder}"')
+
+        # Get a list of certificate arguments
+        cert_args = ""
+        if certs:
+            for cert_path in certs:
+                cert_args += f"--certificate-file {cert_path} "
+
+        # Sume the total payments
+        total_payments = 0
+        if payments:
+            total_payments = sum(payments)
+
+        # Get a list of payment args
+        pymt_args_zero = ""
+        pymt_args = ""
+        if receive_addrs:
+            for addr, amt in zip(receive_addrs, payments):
+                pymt_args_zero += f"--tx-out {addr}+0 "
+                pymt_args += f"--tx-out {addr}+{amt:.0f} "
+
+        # Get a list of UTXOs and sort them in decending order by value.
+        utxos = self.get_utxos(payment_addr)
+        utxos.sort(key=lambda k: k["Lovelace"], reverse=True)
+
+        # Determine the TTL
+        tip = self.get_tip()
+        ttl = tip + self.ttl_buffer
+
+        # Ensure the parameters file exists
+        self.load_protocol_parameters()
+
+        # Iterate through the UTXOs until we have enough funds to cover the
+        # transaction. Also, create the tx_in string for the transaction.
+        tx_name = datetime.now().strftime("tx_%Y-%m-%d_%Hh%Mm%Ss")
+        tx_draft_file = Path(self.working_dir) / (tx_name + ".draft")
+        lovelaces_out = sys.maxsize  # must be larger than zero
+        utxo_total = 0
+        min_fee = 1  # make this start greater than utxo_total
+        tx_in_str = ""
+        for idx, utxo in enumerate(utxos):
+            utxo_count = idx + 1
+            utxo_total += int(utxo["Lovelace"])
+            tx_in_str += f"--tx-in {utxo['TxHash']}#{utxo['TxIx']} "
+
+            # Build a transaction draft
+            self.__run(
+                f"{self.cli} transaction build-raw {tx_in_str}"
+                f"--tx-out {payment_addr}+0 {pymt_args_zero} --ttl 0 --fee 0 "
+                f"--out-file {tx_draft_file} {cert_args}"
+            )
+
+            # Calculate the minimum fee
+            min_fee = self.calc_min_fee(
+                tx_draft_file,
+                utxo_count,
+                tx_out_count=1,
+                witness_count=witness_count,
+            )
+
+            # If we have enough Lovelaces to cover the transaction can stop
+            # iterating through the UTXOs.
+            lovelaces_out = min_fee + deposits + total_payments
+            if utxo_total > lovelaces_out:
+                break
+
+        # Handle the error case where there is not enough inputs for the output
+        if utxo_total < lovelaces_out:
+            # This is the case where the sending wallet has no UTXOs to spend.
+            # The above for loop didn't run at all which is why the
+            # lovelaces_out value is still sys.maxsize.
+            if lovelaces_out == sys.maxsize:
+                raise ShelleyError(
+                    f"Transaction failed due to insufficient funds. Account "
+                    f"{payment_addr} is empty."
+                )
+            cost_ada = lovelaces_out / 1_000_000
+            utxo_total_ada = utxo_total / 1_000_000
+            raise ShelleyError(
+                f"Transaction failed due to insufficient funds. Account "
+                f"{payment_addr} cannot pay tranction costs of {cost_ada} "
+                f"ADA because it only contains {utxo_total_ada} ADA."
+            )
+
+        # Setup the new UTXO
+        utxo_str = ""
+        utxo_amt = utxo_total - lovelaces_out
+        if utxo_amt == 0:
+            # The transaction is emptying the account. No UTXO.
+            pass
+        elif utxo < self.protocol_parameters["minUTxOValue"]:
+            # Verify that the UTXO is larger than the minimum.
+            raise ShelleyError(
+                f"Transaction failed due to insufficient funds. Account "
+                f"{payment_addr} cannot pay tranction costs of {cost_ada} "
+                f"ADA because it only contains {utxo_total_ada} ADA."
+            )
+        else:
+            utxo_str = f"--tx-out {payment_addr}+{utxo}"
+
+        # Build the transaction to the blockchain.
+        tx_raw_file = Path(self.working_dir) / (tx_name + ".raw")
+        self.__run(
+            f"{self.cli} transaction build-raw {tx_in_str} {utxo_str} "
+            f"{pymt_args} --ttl {ttl} --fee {min_fee} "
+            f"--out-file {tx_raw_file} {cert_args}"
+        )
+
+        # Return the path to the raw transaction file.
+        return tx_raw_file
+
+    def witness_transaction(self, tx_file, witnesses) -> str:
+        """Sign a transaction file with witness file(s).
+
+        Parameters
+        ----------
+        tx_file : str or Path
+            Path to the transaction file to be signed.
+        witnesses : list
+            List of paths (str or Path) to the witness files.
+
+        Returns
+        -------
+        str
+            Path to the signed transaction file.
+        """
+
+        # Generate a list of witness args.
+        witness_args = ""
+        for witness in witnesses:
+            witness_args += f"--witness-file {witness} "
+
+        # Sign the transaction with the signing key
+        tx_name = Path(tx_file).stem
+        tx_signed_file = tx_name + ".signed"
+        self.__run(
+            f"{self.cli} transaction sign-witness "
+            f"--tx-body-file {tx_file} {witness_args}"
+            f"--out-file {tx_signed_file}"
+        )
+
+        # Return the path to the signed file for downstream use.
+        return tx_signed_file
+
+    def sign_transaction(self, tx_file, skeys) -> str:
+        """Sign a transaction file with a signing key.
+
+        Parameters
+        ----------
+        tx_file : str or Path
+            Path to the transaction file to be signed.
+        skeys : list
+            List of paths (str or Path) to the signing key files.
+        
+        Returns
+        -------
+        str
+            Path to the signed transaction file.
+        """
+
+        # Generate a list of signing key args.
+        signing_key_args = ""
+        for key_path in skeys:
+            signing_key_args += f"--signing-key-file {key_path} "
+
+        # Sign the transaction with the signing key
+        tx_name = Path(tx_file).stem
+        tx_signed_file = tx_name + ".signed"
+        self.__run(
+            f"{self.cli} transaction sign "
+            f"--tx-body-file {tx_file} {signing_key_args}"
+            f"{self.network} --out-file {tx_signed_file}"
+        )
+
+        # Return the path to the signed file for downstream use.
+        return tx_signed_file
+
+    def submit_transaction(self, signed_tx_file, cleanup=False):
+        """Submit a transaction to the blockchain. This function is separate to
+        enable the submissions of transactions signed by offline keys.
+        
+        Parameters
+        ----------
+        signed_tx_file : str or Path
+            Path to the signed transaction file ready for submission.
+        cleanup : bool, optional
+            Flag that indicates if the temporary transaction files should be
+            removed when finished (defaults to false).
+        """
+
+        # Submit the transaction
+        self.__run(
+            f"{self.cli} transaction submit "
+            f"--tx-file {signed_tx_file} {self.network}"
+        )
+
+        # Delete the transaction files if specified.
+        if cleanup:
+            self.__cleanup_file(signed_tx_file)
+
+    def register_stake_pool(
+        self,
+        pool_name,
+        pool_pledge,
+        pool_cost,
+        pool_margin,
+        pool_cold_vkey,
+        pool_cold_skey,
+        pool_vrf_key,
+        pool_reward_vkey,
+        owner_stake_vkeys,
+        owner_stake_skeys,
+        payment_addr,
+        payment_skey,
+        genesis_file,
+        pool_relays=None,
+        pool_metadata_url=None,
+        pool_metadata_hash=None,
+        folder=None,
+        offline=False,
+        cleanup=True,
+    ):
         """Register a stake pool on the blockchain.
 
         Parameters
@@ -743,9 +1212,9 @@ class ShelleyTools():
                 "host-type" specifying the type of data in the "host" key.
         pool_metadata_url : str, optional
             URL to the pool's metadata JSON file.
-        pool_metadat_hash : str, optional
+        pool_metadata_hash : str, optional
             Optionally specify the hash of the metadata JSON file. If this is
-            not specified and the pool_metadat_hash is, then the code will
+            not specified and the pool_metadata_hash is, then the code will
             download the file from the URL and compute the hash.
         folder : str or Path, optional
             The directory where the generated files/certs will be placed.
@@ -767,96 +1236,43 @@ class ShelleyTools():
             if self.ssh is None:
                 folder.mkdir(parents=True, exist_ok=True)
             else:
-                self.__run(f"mkdir -p \"{folder}\"")
+                self.__run(f'mkdir -p "{folder}"')
 
-        # Get the hash of the JSON file if the URL is provided and the hash is
-        # not specified.
-        metadata_args = ""
-        if pool_metadata_url is not None:
-            if pool_metadat_hash is None:
-                metadata_file = folder / "metadata_file_download.json"
-                self.__download_file(pool_metadata_url, metadata_file)
-                result = self.__run(
-                    f"{self.cli} stake-pool metadata-hash "
-                    f"--pool-metadata-file {metadata_file}"
-                )
-                pool_metadat_hash = result.stdout.strip()
-
-            # Create the arg string for the pool cert.
-            metadata_args = (
-                f"--metadata-url {pool_metadata_url} "
-                f"--metadata-hash {pool_metadat_hash}"
-            )
-
-        # Create the relay arg string. Basically, we need a port and host arg
-        # but there can be different forms of the host argument. See the
-        # caradno-cli documentation. The simpliest way I could figure was to
-        # use a list of dictionaries where each dict represents a relay.
-        relay_args = ""
-        for relay in pool_relays:
-            if "ipv4" in relay['host-type']:
-                host_arg = f"--pool-relay-ipv4 {relay['host']}"
-            elif "ipv6" in relay['host-type']:
-                host_arg = f"--pool-relay-ipv4 {relay['host']}"
-            elif "single" in relay['host-type']:
-                host_arg = f"--single-host-pool-relay {relay['host']}"
-            elif "multi" in relay['host-type']:
-                relay_args += f"--multi-host-pool-relay {relay['host']}"
-                continue  # No port info for this case
-            else:
-                continue  # Skip if invalid host type
-            port_arg = f"--pool-relay-port {relay['port']}"
-            relay_args += f"{host_arg} {port_arg} "
-
-        # Create the argument string for the list of owner verification keys.
-        owner_vkey_args = ""
-        for key_path in owner_stake_vkeys:
-            arg = f"--pool-owner-stake-verification-key-file {key_path} "
-            owner_vkey_args += arg
-
-        # Generate Stake pool registration certificate
-        pool_cert_path = folder / (pool_name + "_registration.cert")
-        self.__run(
-            f"{self.cli} stake-pool registration-certificate "
-            f"--cold-verification-key-file {pool_cold_vkey} "
-            f"--vrf-verification-key-file {pool_vrf_key} "
-            f"--pool-pledge {pool_pledge} "
-            f"--pool-cost {pool_cost} "
-            f"--pool-margin {pool_margin/100} "
-            f"--pool-reward-account-verification-key-file {pool_reward_vkey} "
-            f"{owner_vkey_args} {relay_args} {metadata_args} "
-            f"{self.network} --out-file {pool_cert_path}"
+        pool_cert_path = self.generate_stake_pool_cert(
+            pool_name,
+            pool_pledge,
+            pool_cost,
+            pool_margin,
+            pool_cold_vkey,
+            pool_vrf_key,
+            pool_reward_vkey,
+            owner_stake_vkeys,
+            pool_relays=pool_relays,
+            pool_metadata_url=pool_metadata_url,
+            pool_metadata_hash=pool_metadata_hash,
+            folder=folder,
         )
 
-        # TODO: Edit the cert free text?
-
-        # Generate delegation certificate (pledge from each owner)
+        # Generate delegation certificates (pledge from each owner)
+        del_certs = self.generate_delegation_cert(
+            owner_stake_vkeys, pool_cold_vkey, folder=folder
+        )
         del_cert_args = ""
-        signing_key_args = ""
-        for key_path in owner_stake_vkeys:
-            key_path = Path(key_path)
-            cert_path = key_path.parent / (key_path.stem + "_delegation.cert")
+        for cert_path in del_certs:
             del_cert_args += f"--certificate-file {cert_path} "
-            self.__run(
-                f"{self.cli} stake-address delegation-certificate "
-                f"--stake-verification-key-file {key_path} "
-                f"--cold-verification-key-file {pool_cold_vkey} "
-                f"--out-file {cert_path}"
-            )
 
         # Generate a list of owner signing key args.
+        signing_key_args = ""
         for key_path in owner_stake_skeys:
             signing_key_args += f"--signing-key-file {key_path} "
 
         # Get the pool deposit from the network genesis parameters.
         json_data = self.__load_text_file(genesis_file)
         pool_deposit = json.loads(json_data)["protocolParams"]["poolDeposit"]
-        print(pool_deposit)
 
         # Get a list of UTXOs and sort them in decending order by value.
         utxos = self.get_utxos(payment_addr)
         utxos.sort(key=lambda k: k["Lovelace"], reverse=True)
-        print(utxos)
 
         # Determine the TTL
         tip = self.get_tip()
@@ -874,7 +1290,7 @@ class ShelleyTools():
         tx_in_str = ""
         for idx, utxo in enumerate(utxos):
             utxo_count = idx + 1
-            utxo_total += int(utxo['Lovelace'])
+            utxo_total += int(utxo["Lovelace"])
             tx_in_str += f" --tx-in {utxo['TxHash']}#{utxo['TxIx']}"
 
             # Build a transaction draft
@@ -887,18 +1303,16 @@ class ShelleyTools():
 
             # Calculate the minimum fee
             nwit = len(owner_stake_skeys) + 2
-            min_fee = self.calc_min_fee(tx_draft_file, utxo_count,
-                                        tx_out_count=1, witness_count=nwit)
+            min_fee = self.calc_min_fee(
+                tx_draft_file, utxo_count, tx_out_count=1, witness_count=nwit
+            )
 
-            print(utxo_count)
-            print(utxo_total)
-
-            # if utxo_total > (min_fee + pool_deposit + 10):
-            #     break
+            if utxo_total > (min_fee + pool_deposit + 10):
+                break
 
         if utxo_total < (min_fee + pool_deposit):
-            cost_ada = (min_fee + pool_deposit)/1_000_000
-            utxo_total_ada = utxo_total/1_000_000
+            cost_ada = (min_fee + pool_deposit) / 1_000_000
+            utxo_total_ada = utxo_total / 1_000_000
             raise ShelleyError(
                 f"Transaction failed due to insufficient funds. Account "
                 f"{payment_addr} cannot pay tranction costs of {cost_ada} "
@@ -935,13 +1349,28 @@ class ShelleyTools():
         else:
             print(f"Signed transaction file saved to: {tx_signed_file}")
 
-    def update_stake_pool_registration(self, pool_name, pool_pledge, pool_cost,
-                            pool_margin, pool_cold_vkey, pool_cold_skey,
-                            pool_vrf_key, pool_reward_vkey, owner_stake_vkeys,
-                            owner_stake_skeys, payment_addr, payment_skey,
-                            genesis_file, pool_relays=None,
-                            pool_metadata_url=None, pool_metadat_hash=None,
-                            folder=None, offline=False, cleanup=True):
+    def update_stake_pool_registration(
+        self,
+        pool_name,
+        pool_pledge,
+        pool_cost,
+        pool_margin,
+        pool_cold_vkey,
+        pool_cold_skey,
+        pool_vrf_key,
+        pool_reward_vkey,
+        owner_stake_vkeys,
+        owner_stake_skeys,
+        payment_addr,
+        payment_skey,
+        genesis_file,
+        pool_relays=None,
+        pool_metadata_url=None,
+        pool_metadata_hash=None,
+        folder=None,
+        offline=False,
+        cleanup=True,
+    ):
         """Update an existing stake pool registration on the blockchain.
 
         Parameters
@@ -987,9 +1416,9 @@ class ShelleyTools():
                 "host-type" specifying the type of data in the "host" key.
         pool_metadata_url : str, optional
             URL to the pool's metadata JSON file.
-        pool_metadat_hash : str, optional
+        pool_metadata_hash : str, optional
             Optionally specify the hash of the metadata JSON file. If this is
-            not specified and the pool_metadat_hash is, then the code will
+            not specified and the pool_metadata_hash is, then the code will
             download the file from the URL and compute the hash.
         folder : str, Path, optional
             The directory where the generated files/certs will be placed.
@@ -1011,27 +1440,26 @@ class ShelleyTools():
             if self.ssh is None:
                 folder.mkdir(parents=True, exist_ok=True)
             else:
-                self.__run(f"mkdir -p \"{folder}\"")
+                self.__run(f'mkdir -p "{folder}"')
 
         # Get the hash of the JSON file if the URL is provided and the hash is
         # not specified.
         metadata_args = ""
         if pool_metadata_url is not None:
-            if pool_metadat_hash is None:
+            if pool_metadata_hash is None:
                 metadata_file = folder / "metadata_file_download.json"
                 self.__download_file(pool_metadata_url, metadata_file)
                 result = self.__run(
                     f"{self.cli} stake-pool metadata-hash "
                     f"--pool-metadata-file {metadata_file}"
                 )
-                pool_metadat_hash = result.stdout.strip()
+                pool_metadata_hash = result.stdout.strip()
 
             # Create the arg string for the pool cert.
             metadata_args = (
                 f"--metadata-url {pool_metadata_url} "
-                f"--metadata-hash {pool_metadat_hash}"
+                f"--metadata-hash {pool_metadata_hash}"
             )
-        print(pool_metadat_hash)
 
         # Create the relay arg string. Basically, we need a port and host arg
         # but there can be different forms of the host argument. See the
@@ -1039,13 +1467,13 @@ class ShelleyTools():
         # use a list of dictionaries where each dict represents a relay.
         relay_args = ""
         for relay in pool_relays:
-            if "ipv4" in relay['host-type']:
+            if "ipv4" in relay["host-type"]:
                 host_arg = f"--pool-relay-ipv4 {relay['host']}"
-            elif "ipv6" in relay['host-type']:
+            elif "ipv6" in relay["host-type"]:
                 host_arg = f"--pool-relay-ipv4 {relay['host']}"
-            elif "single" in relay['host-type']:
+            elif "single" in relay["host-type"]:
                 host_arg = f"--single-host-pool-relay {relay['host']}"
-            elif "multi" in relay['host-type']:
+            elif "multi" in relay["host-type"]:
                 relay_args += f"--multi-host-pool-relay {relay['host']}"
                 continue  # No port info for this case
             else:
@@ -1116,7 +1544,7 @@ class ShelleyTools():
         tx_in_str = ""
         for idx, utxo in enumerate(utxos):
             utxo_count = idx + 1
-            utxo_total += int(utxo['Lovelace'])
+            utxo_total += int(utxo["Lovelace"])
             tx_in_str += f" --tx-in {utxo['TxHash']}#{utxo['TxIx']}"
 
             # Build a transaction draft
@@ -1129,15 +1557,16 @@ class ShelleyTools():
 
             # Calculate the minimum fee
             nwit = len(owner_stake_skeys) + 2
-            min_fee = self.calc_min_fee(tx_draft_file, utxo_count,
-                                        tx_out_count=1, witness_count=nwit)
+            min_fee = self.calc_min_fee(
+                tx_draft_file, utxo_count, tx_out_count=1, witness_count=nwit
+            )
 
             if utxo_total > (min_fee + pool_deposit):
                 break
 
         if utxo_total < min_fee:
-            cost_ada = (min_fee + pool_deposit)/1_000_000
-            utxo_total_ada = utxo_total/1_000_000
+            cost_ada = (min_fee + pool_deposit) / 1_000_000
+            utxo_total_ada = utxo_total / 1_000_000
             raise ShelleyError(
                 f"Transaction failed due to insufficient funds. Account "
                 f"{payment_addr} cannot pay tranction costs of {cost_ada} "
@@ -1174,8 +1603,16 @@ class ShelleyTools():
         else:
             print(f"Signed transaction file saved to: {tx_signed_file}")
 
-    def retire_stake_pool(self, remaining_epochs, genesis_file, cold_vkey,
-                          cold_skey, payment_skey, payment_addr, cleanup=True):
+    def retire_stake_pool(
+        self,
+        remaining_epochs,
+        genesis_file,
+        cold_vkey,
+        cold_skey,
+        payment_skey,
+        payment_addr,
+        cleanup=True,
+    ):
         """Retire a stake pool using the stake pool keys.
 
         To retire the stake pool we need to:
@@ -1250,7 +1687,7 @@ class ShelleyTools():
         tx_in_str = ""
         for idx, utxo in enumerate(utxos):
             utxo_count = idx + 1
-            utxo_total += int(utxo['Lovelace'])
+            utxo_total += int(utxo["Lovelace"])
             tx_in_str += f" --tx-in {utxo['TxHash']}#{utxo['TxIx']}"
 
             # Build a transaction draft
@@ -1261,15 +1698,16 @@ class ShelleyTools():
             )
 
             # Calculate the minimum fee
-            min_fee = self.calc_min_fee(tx_draft_file, utxo_count,
-                                        tx_out_count=1, witness_count=2)
+            min_fee = self.calc_min_fee(
+                tx_draft_file, utxo_count, tx_out_count=1, witness_count=2
+            )
 
             if utxo_total > min_fee:
                 break
 
         if utxo_total < min_fee:
             # cost_ada = min_fee/1_000_000
-            utxo_total_ada = utxo_total/1_000_000
+            utxo_total_ada = utxo_total / 1_000_000
             raise ShelleyError(
                 f"Transaction failed due to insufficient funds. Account "
                 f"{payment_addr} cannot pay tranction costs of {min_fee} "
@@ -1321,14 +1759,21 @@ class ShelleyTools():
             The stake pool id.
         """
         result = self.__run(
-            f"{self.cli} stake-pool id "
-            f"--verification-key-file {cold_vkey}"
+            f"{self.cli} stake-pool id " f"--verification-key-file {cold_vkey}"
         )
         pool_id = result.stdout
         return pool_id
 
-    def claim_staking_rewards(self, stake_addr, stake_skey, receive_addr, 
-        payment_skey, payment_addr=None, offline=False, cleanup=True):
+    def claim_staking_rewards(
+        self,
+        stake_addr,
+        stake_skey,
+        receive_addr,
+        payment_skey,
+        payment_addr=None,
+        offline=False,
+        cleanup=True,
+    ):
         """Withdraw staking address rewards to a spending address.
 
         Thanks to @ATADA_Stakepool who's scripts greatly influenced the 
@@ -1354,7 +1799,7 @@ class ShelleyTools():
             Flag that indicates if the temporary transaction files should be
             removed when finished (defaults to True).
         """
-        
+
         # Calculate the amount to withdraw.
         rewards = self.get_rewards_balance(stake_addr)
         if rewards <= 0.0:
@@ -1392,7 +1837,7 @@ class ShelleyTools():
         tx_in_str = ""
         for idx, utxo in enumerate(utxos):
             utxo_count = idx + 1
-            utxo_total += int(utxo['Lovelace'])
+            utxo_total += int(utxo["Lovelace"])
             tx_in_str += f" --tx-in {utxo['TxHash']}#{utxo['TxIx']}"
 
             # If the address receiving the funds is also paying the TX fee.
@@ -1405,8 +1850,9 @@ class ShelleyTools():
                 )
 
                 # Calculate the minimum fee
-                min_fee = self.calc_min_fee(tx_draft_file, utxo_count,
-                                            tx_out_count=1, witness_count=2)
+                min_fee = self.calc_min_fee(
+                    tx_draft_file, utxo_count, tx_out_count=1, witness_count=2
+                )
 
             # If another address is paying the TX fee.
             else:
@@ -1419,27 +1865,28 @@ class ShelleyTools():
                 )
 
                 # Calculate the minimum fee
-                min_fee = self.calc_min_fee(tx_draft_file, utxo_count,
-                                            tx_out_count=2, witness_count=2)
+                min_fee = self.calc_min_fee(
+                    tx_draft_file, utxo_count, tx_out_count=2, witness_count=2
+                )
 
             # If we have enough in the UTXO we are done, otherwise, continue.
             if utxo_total > min_fee:
                 break
 
         if utxo_total < min_fee:
-            cost_ada = min_fee/1_000_000
-            utxo_total_ada = utxo_total/1_000_000
+            cost_ada = min_fee / 1_000_000
+            utxo_total_ada = utxo_total / 1_000_000
             a = receive_addr if payment_addr == receive_addr else payment_addr
             raise ShelleyError(
                 f"Transaction failed due to insufficient funds. "
                 f"Account {a} cannot pay tranction costs of {cost_ada} "
                 f"ADA because it only contains {utxo_total_ada} ADA."
             )
-        
+
         # Build the transaction.
         tx_raw_file = Path(self.working_dir) / (tx_name + ".raw")
-        if payment_addr == receive_addr:  
-            # If the address receiving the funds is also paying the TX fee.  
+        if payment_addr == receive_addr:
+            # If the address receiving the funds is also paying the TX fee.
             self.__run(
                 f"{self.cli} transaction build-raw{tx_in_str} "
                 f"--tx-out {receive_addr}+{utxo_total - min_fee + rewards} "
@@ -1508,10 +1955,10 @@ class ShelleyTools():
             if self.ssh is None:
                 folder.mkdir(parents=True, exist_ok=True)
             else:
-                self.__run(f"mkdir -p \"{folder}\"")
+                self.__run(f'mkdir -p "{folder}"')
 
         # Open the private key file to check its format.
-        prvkey = open(itn_prv_key, 'r').read()
+        prvkey = open(itn_prv_key, "r").read()
 
         # Convert the private key
         skey_file = folder / (Path(itn_prv_key).stem + "_shelley_staking.skey")
@@ -1581,28 +2028,94 @@ class ShelleyTools():
         balance = sum(b["rewardAccountBalance"] for b in info)
         return balance
 
-    def submit_transaction(self, signed_tx_file, cleanup=False):
-        """Submit a transaction to the blockchain. This function is separate to
-        enable the submissions of transactions signed by offline keys.
-        
+    def empty_account(
+        self, to_addr, from_addr, key_file, offline=False, cleanup=True
+    ):
+        """Send all ADA contained in one address to another address.
+
         Parameters
         ----------
-        signed_tx_file : str or Path
-            Path to the signed transaction file ready for submission.
+        to_addr : str
+            Address to send the ADA to.
+        from_addr : str
+            Address to send the ADA from.
+        key_file : str or Path
+            Path to the send address signing key file.
+        offline: bool, optional
+            Flag to indicate if the transactions is being generated offline.
+            If true (defaults to false), the transaction file is signed but
+            not sent.
         cleanup : bool, optional
             Flag that indicates if the temporary transaction files should be
-            removed when finished (defaults to false).
+            removed when finished (defaults to True).
         """
 
-        # Submit the transaction
+        # Get the address balance
+        bal = self.query_balance(from_addr)
+
+        # Build a transaction name
+        tx_name = datetime.now().strftime("empty_acct_%Y-%m-%d_%Hh%Mm%Ss")
+
+        # Get a list of UTXOs and create tx_in string.
+        tx_in_str = ""
+        utxos = self.get_utxos(from_addr)
+        for utxo in utxos:
+            tx_in_str += f" --tx-in {utxo['TxHash']}#{utxo['TxIx']}"
+
+        # Build a transaction draft
+        tx_draft_file = Path(self.working_dir) / (tx_name + ".draft")
         self.__run(
-            f"{self.cli} transaction submit "
-            f"--tx-file {signed_tx_file} {self.network}"
+            f"{self.cli} transaction build-raw{tx_in_str} "
+            f"--tx-out {to_addr}+0 "
+            f"--ttl 0 --fee 0 --out-file {tx_draft_file}"
         )
 
-        # Delete the transaction files if specified.
+        # Calculate the minimum fee
+        min_fee = self.calc_min_fee(
+            tx_draft_file, len(utxos), tx_out_count=2, witness_count=1
+        )
+
+        if min_fee > bal:
+            raise ShelleyError(
+                f"Transaction failed due to insufficient funds. "
+                f"Account {from_addr} cannot send {bal/1_000_000} ADA plus "
+                f"fees of {min_fee/1_000_000} ADA to account {to_addr} "
+                f"because it only contains {bal/1_000_000.} ADA."
+            )
+            # Maybe this should fail more gracefully, but higher level logic
+            # can also just catch the error and handle it.
+
+        # Determine the slot where the transaction will become invalid. Get the
+        # current slot number and add a buffer to it.
+        tip = self.get_tip()
+        ttl = tip + self.ttl_buffer
+
+        # Build the transaction
+        tx_raw_file = Path(self.working_dir) / (tx_name + ".raw")
+        self.__run(
+            f"{self.cli} transaction build-raw{tx_in_str} "
+            f"--tx-out {to_addr}+{(bal - min_fee):.0f} "
+            f"--ttl {ttl} --fee {min_fee} --out-file {tx_raw_file}"
+        )
+
+        # Sign the transaction with the signing key
+        tx_signed_file = Path(self.working_dir) / (tx_name + ".signed")
+        self.__run(
+            f"{self.cli} transaction sign "
+            f"--tx-body-file {tx_raw_file} --signing-key-file {key_file} "
+            f"{self.network} --out-file {tx_signed_file}"
+        )
+
+        # Delete the intermediate transaction files if specified.
         if cleanup:
-            self.__cleanup_file(signed_tx_file)
+            self.__cleanup_file(tx_draft_file)
+            self.__cleanup_file(tx_raw_file)
+
+        # Submit the transaction
+        if not offline:
+            self.submit_transaction(tx_signed_file, cleanup)
+        else:
+            print(f"Signed transaction file saved to: {tx_signed_file}")
 
 
 if __name__ == "__main__":
