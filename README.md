@@ -60,7 +60,7 @@ shelley = ShelleyTools(
     path_to_cli, 
     path_to_socket, 
     working_dir, 
-    network="--testnet-magic 42"  # <-- For the testnet (default: --mainnet)
+    network="--testnet-magic 1097911063"  # <-- For the testnet (default: --mainnet)
 )
 
 # Create a wallet address with both spending and staking keys.
