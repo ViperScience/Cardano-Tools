@@ -11,7 +11,7 @@ addr = ""
 
 # Create a ShelleyTools object
 shelley = ShelleyTools(path_to_cli, path_to_socket, working_dir, 
-    network="--testnet-magic 42")
+    network="--testnet-magic 1097911063")
 
 # Run tests
 print(shelley.cli)
