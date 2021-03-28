@@ -17,7 +17,7 @@ shelley = ShelleyTools(
 # shelley.debug = True
 
 # Get the addresses
-addr = open(working_dir / "mywallet.addr", 'r').read()
+addr = open(working_dir + "/mywallet.addr", 'r').read()
 
 # Get and print the balances
 print(shelley.query_balance(addr))
