@@ -15,7 +15,7 @@ class ShelleyTools():
 
     def __init__(self, path_to_cli, path_to_socket, working_dir,
                  ttl_buffer=1000, ssh=None, network="--mainnet",
-                 era="--allegra-era"):
+                 era="--mary-era"):
 
         # Debug flag -- may be set after object initialization.
         self.debug = False
@@ -208,6 +208,51 @@ class ShelleyTools():
         addr = self.__load_text_file(payment_addr).strip()
         return addr
 
+    def mint_asset(self, name, amount, folder=None) -> str:
+        """Create an address and script for a new asset
+        """
+        if folder is None:
+            folder = self.working_dir
+
+        folder = Path(folder)
+        if self.ssh is None:
+            folder.mkdir(parents=True, exist_ok=True)
+        else:
+            self.__run(f"mkdir -p \"{folder}\"")
+        policy_vkey = folder / (name + ".vkey")
+        policy_skey = folder / (name + ".skey")
+        policy_script = folder / "policy.script"
+
+        # Generate payment key pair.
+        self.__run(
+            f"{self.cli} address key-gen "
+            f"--verification-key-file {policy_vkey} "
+            f"--signing-key-file {policy_skey}"
+        )
+
+        # Generate key hash
+        keyHash = self.__run(
+            f"{self.cli} address key-hash "
+            f"--payment-verification-key-file {policy_vkey} "
+        )
+
+        # Create policy script
+        script = {
+            "keyHash": keyHash[0],
+            "type": "sig",
+        }
+        with open(policy_script, "w") as policy_file:
+            json.dump(script, policy_file)
+
+        # Read the file and return the policy address.
+        result = self.__run(
+            f"{self.cli} transaction policyid "
+            f"--script-file {policy_script} "
+        )
+        policy_hash = result.stdout.split('\n')[0]
+
+        return policy_hash
+
     def get_utxos(self, addr) -> list:
         """Query the list of UTXOs for a given address and parse the output.
         The returned data is formatted as a list of dict objects.
@@ -218,22 +263,44 @@ class ShelleyTools():
         raw_utxos = result.stdout.split('\n')[2:]
         utxos = []
         for utxo_line in raw_utxos:
-            vals = utxo_line.split()
-            utxos.append({
-                "TxHash": vals[0],
-                "TxIx": vals[1],
-                "Lovelace": vals[2]
-            })
+            utxos.append(self._parse_utxo(utxo_line))
         return utxos
 
-    def query_balance(self, addr) -> int:
-        """Query an address balance in lovelace.
+    def _parse_utxo(self, raw_utxo):
+        """Parses a raw UTXO line
         """
-        total = 0
+        vals = raw_utxo.split()
+        # Assign header elements
+        rmap = {
+            "TxHash": vals[0],
+            "TxIx": vals[1],
+        }
+        # Parse assets
+        vals = vals[2:]
+        for idx in range(int(len(vals) / 3) + 1):
+            base = idx * 3
+            balance = int(vals[base])
+            policy = vals[base + 1]
+            # The same asset can be listed multiple times in a single UTXO
+            if policy not in rmap.keys():
+                rmap[policy] = balance
+            else:
+                rmap[policy] += balance
+        return rmap
+
+    def query_balance(self, addr) -> int:
+        """Query an address balance for all assets in wallet.
+        """
+        totals = {}
         utxos = self.get_utxos(addr)
         for utxo in utxos:
-            total += int(utxo["Lovelace"])
-        return total
+            for k, v in utxo.items():
+                if k not in ["TxHash", "TxIx"]: # Ignore header fields
+                    if k not in totals.keys():
+                        totals[k] = int(v)
+                    else:
+                        totals[k] += int(v)
+        return totals
 
     def calc_min_fee(self, tx_draft, tx_in_count, tx_out_count, witness_count,
                      byron_witness_count=0) -> int:
@@ -255,6 +322,7 @@ class ShelleyTools():
         params_file = self.load_protocol_parameters()
         result = self.__run(
             f"{self.cli} transaction calculate-min-fee "
+            f"{self.era} {self.network}"
             f"--tx-body-file {tx_draft} "
             f"--tx-in-count {tx_in_count} "
             f"--tx-out-count {tx_out_count} "
@@ -265,7 +333,7 @@ class ShelleyTools():
         min_fee = int(result.stdout.split()[0])
         return min_fee
 
-    def send_payment(self, amt, to_addr, from_addr, key_file, offline=False,
+    def send_payment(self, amt, to_addr, from_addr, key_file, asset_amt=None, policy_id=None, policy_file=None, mint=False, offline=False,
                      cleanup=True):
         """Send ADA from one address to another.
 
@@ -279,6 +347,14 @@ class ShelleyTools():
             Address to send the ADA from.
         key_file : str or Path
             Path to the send address signing key file.
+        asset_amt : int
+            Amount of asset to send
+        policy_id : str
+            Policy hex identifier, plus optional alphanumeric suffix (if minting/sending an asset)
+        policy_file : str or Path
+            Path to policy signing key file (if minting/sending an asset)
+        mint : bool
+            Whether or not to mint the amount of the specified asset
         offline: bool, optional
             Flag to indicate if the transactions is being generated offline.
             If true (defaults to false), the transaction file is signed but
@@ -287,6 +363,8 @@ class ShelleyTools():
             Flag that indicates if the temporary transaction files should be
             removed when finished (defaults to True).
         """
+        # TODO: If sending a minted asset, we'll need to search UTXOs for this as well
+
         payment = amt*1_000_000  # ADA to Lovelaces
 
         # Build a transaction name
@@ -294,7 +372,7 @@ class ShelleyTools():
 
         # Get a list of UTXOs and sort them in decending order by value.
         utxos = self.get_utxos(from_addr)
-        utxos.sort(key=lambda k: k["Lovelace"], reverse=True)
+        utxos.sort(key=lambda k: k["lovelace"], reverse=True)
 
         # Iterate through the UTXOs until we have enough funds to cover the
         # transaction. Also, create the tx_in string for the transaction.
@@ -302,10 +380,20 @@ class ShelleyTools():
         utxo_total = 0
         tx_in_str = ""
         min_fee = 0
+
+        if mint:
+            mint_tx_str = f"{asset_amt} {policy_id}"
+            mint_str = f"--mint='{mint_tx_str}'"
+            mint_sign_str = f"--signing-key-file {policy_file}"
+        else:
+            mint_tx_str = ""
+            mint_str = ""
+            mint_sign_str = ""
+
         for count, utxo in enumerate(utxos):
 
             utxo_count = count + 1
-            utxo_total += int(utxo['Lovelace'])
+            utxo_total += int(utxo['lovelace'])
             tx_in_str += f" --tx-in {utxo['TxHash']}#{utxo['TxIx']}"
             if utxo_total < payment:
                 continue
@@ -313,13 +401,15 @@ class ShelleyTools():
             # Build a transaction draft
             self.__run(
                 f"{self.cli} transaction build-raw{tx_in_str} "
-                f"--tx-out {to_addr}+0 --tx-out {from_addr}+0 "
+                f"{self.era} --tx-out {to_addr}+0 --tx-out {from_addr}+0+{mint_tx_str} "
+                f"{mint_str}"
                 f"--ttl 0 --fee 0 --out-file {tx_draft_file}"
             )
-
+            
             # Calculate the minimum fee
+            witness_count = 2 if mint else 1
             min_fee = self.calc_min_fee(tx_draft_file, utxo_count,
-                                        tx_out_count=2, witness_count=1)
+                                        tx_out_count=2, witness_count=witness_count)
 
             if utxo_total > (payment + min_fee):
                 break
@@ -344,8 +434,9 @@ class ShelleyTools():
         tx_raw_file = Path(self.working_dir) / (tx_name + ".raw")
         self.__run(
             f"{self.cli} transaction build-raw{tx_in_str} "
-            f"--tx-out {to_addr}+{payment:.0f} "
-            f"--tx-out {from_addr}+{(utxo_total - total_lovelace_out):.0f} "
+            f"{self.era} --tx-out {to_addr}+{payment:.0f} "
+            f"--tx-out {from_addr}+{(utxo_total - total_lovelace_out):.0f}+{mint_tx_str} "
+            f"{mint_str}"
             f"--ttl {ttl} --fee {min_fee} --out-file {tx_raw_file}"
         )
 
@@ -353,7 +444,7 @@ class ShelleyTools():
         tx_signed_file = Path(self.working_dir) / (tx_name + ".signed")
         self.__run(
             f"{self.cli} transaction sign "
-            f"--tx-body-file {tx_raw_file} --signing-key-file {key_file} "
+            f"--tx-body-file {tx_raw_file} --signing-key-file {key_file} {mint_sign_str}"
             f"{self.network} --out-file {tx_signed_file}"
         )
 
@@ -415,7 +506,7 @@ class ShelleyTools():
                 f"Account {addr} cannot pay tranction costs because "
                 "it does not contain any ADA."
             )
-        utxos.sort(key=lambda k: k["Lovelace"], reverse=True)
+        utxos.sort(key=lambda k: k["lovelace"], reverse=True)
 
         # Ensure the parameters file exists
         self.load_protocol_parameters()
@@ -427,7 +518,7 @@ class ShelleyTools():
         tx_in_str = ""
         for idx, utxo in enumerate(utxos):
             utxo_count = idx + 1
-            utxo_total += int(utxo['Lovelace'])
+            utxo_total += int(utxo['lovelace'])
             tx_in_str += f" --tx-in {utxo['TxHash']}#{utxo['TxIx']}"
 
             # Build a transaction draft
@@ -855,7 +946,7 @@ class ShelleyTools():
 
         # Get a list of UTXOs and sort them in decending order by value.
         utxos = self.get_utxos(payment_addr)
-        utxos.sort(key=lambda k: k["Lovelace"], reverse=True)
+        utxos.sort(key=lambda k: k["lovelace"], reverse=True)
         print(utxos)
 
         # Determine the TTL
@@ -874,7 +965,7 @@ class ShelleyTools():
         tx_in_str = ""
         for idx, utxo in enumerate(utxos):
             utxo_count = idx + 1
-            utxo_total += int(utxo['Lovelace'])
+            utxo_total += int(utxo['lovelace'])
             tx_in_str += f" --tx-in {utxo['TxHash']}#{utxo['TxIx']}"
 
             # Build a transaction draft
@@ -1098,7 +1189,7 @@ class ShelleyTools():
 
         # Get a list of UTXOs and sort them in decending order by value.
         utxos = self.get_utxos(payment_addr)
-        utxos.sort(key=lambda k: k["Lovelace"], reverse=True)
+        utxos.sort(key=lambda k: k["lovelace"], reverse=True)
 
         # Determine the TTL
         tip = self.get_tip()
@@ -1116,7 +1207,7 @@ class ShelleyTools():
         tx_in_str = ""
         for idx, utxo in enumerate(utxos):
             utxo_count = idx + 1
-            utxo_total += int(utxo['Lovelace'])
+            utxo_total += int(utxo['lovelace'])
             tx_in_str += f" --tx-in {utxo['TxHash']}#{utxo['TxIx']}"
 
             # Build a transaction draft
@@ -1241,7 +1332,7 @@ class ShelleyTools():
 
         # Get a list of UTXOs and sort them in decending order by value.
         utxos = self.get_utxos(payment_addr)
-        utxos.sort(key=lambda k: k["Lovelace"], reverse=True)
+        utxos.sort(key=lambda k: k["lovelace"], reverse=True)
 
         # Iterate through the UTXOs until we have enough funds to cover the
         # transaction. Also, create the tx_in string for the transaction.
@@ -1250,7 +1341,7 @@ class ShelleyTools():
         tx_in_str = ""
         for idx, utxo in enumerate(utxos):
             utxo_count = idx + 1
-            utxo_total += int(utxo['Lovelace'])
+            utxo_total += int(utxo['lovelace'])
             tx_in_str += f" --tx-in {utxo['TxHash']}#{utxo['TxIx']}"
 
             # Build a transaction draft
@@ -1373,7 +1464,7 @@ class ShelleyTools():
                 f"Account {payment_addr} cannot pay tranction costs because "
                 "it does not contain any ADA."
             )
-        utxos.sort(key=lambda k: k["Lovelace"], reverse=True)
+        utxos.sort(key=lambda k: k["lovelace"], reverse=True)
 
         # Build a transaction name
         tx_name = datetime.now().strftime("claim_rewards_%Y-%m-%d_%Hh%Mm%Ss")
@@ -1392,7 +1483,7 @@ class ShelleyTools():
         tx_in_str = ""
         for idx, utxo in enumerate(utxos):
             utxo_count = idx + 1
-            utxo_total += int(utxo['Lovelace'])
+            utxo_total += int(utxo['lovelace'])
             tx_in_str += f" --tx-in {utxo['TxHash']}#{utxo['TxIx']}"
 
             # If the address receiving the funds is also paying the TX fee.
