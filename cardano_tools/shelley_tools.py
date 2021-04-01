@@ -226,9 +226,7 @@ class ShelleyTools:
         utxos = []
         for utxo_line in raw_utxos:
             vals = utxo_line.split()
-            utxos.append(
-                {"TxHash": vals[0], "TxIx": vals[1], "Lovelace": vals[2]}
-            )
+            utxos.append({"TxHash": vals[0], "TxIx": vals[1], "Lovelace": vals[2]})
         return utxos
 
     def query_balance(self, addr) -> int:
@@ -241,12 +239,7 @@ class ShelleyTools:
         return total
 
     def calc_min_fee(
-        self,
-        tx_draft,
-        tx_in_count,
-        tx_out_count,
-        witness_count,
-        byron_witness_count=0,
+        self, tx_draft, tx_in_count, tx_out_count, witness_count, byron_witness_count=0
     ) -> int:
         """Calculate the minimum fee in lovelaces for the transaction.
 
@@ -306,78 +299,23 @@ class ShelleyTools:
         """
         payment = amt * 1_000_000  # ADA to Lovelaces
 
-        # Build a transaction name
-        tx_name = datetime.now().strftime("%Y-%m-%d_%Hh%Mm%Ss")
-
-        # Get a list of UTXOs and sort them in decending order by value.
-        utxos = self.get_utxos(from_addr)
-        utxos.sort(key=lambda k: k["Lovelace"], reverse=True)
-
-        # Iterate through the UTXOs until we have enough funds to cover the
-        # transaction. Also, create the tx_in string for the transaction.
-        tx_draft_file = Path(self.working_dir) / (tx_name + ".draft")
-        utxo_total = 0
-        tx_in_str = ""
-        min_fee = 0
-        for count, utxo in enumerate(utxos):
-
-            utxo_count = count + 1
-            utxo_total += int(utxo["Lovelace"])
-            tx_in_str += f" --tx-in {utxo['TxHash']}#{utxo['TxIx']}"
-            if utxo_total < payment:
-                continue
-
-            # Build a transaction draft
-            self.__run(
-                f"{self.cli} transaction build-raw{tx_in_str} "
-                f"--tx-out {to_addr}+0 --tx-out {from_addr}+0 "
-                f"--ttl 0 --fee 0 --out-file {tx_draft_file}"
-            )
-
-            # Calculate the minimum fee
-            min_fee = self.calc_min_fee(
-                tx_draft_file, utxo_count, tx_out_count=2, witness_count=1
-            )
-
-            if utxo_total > (payment + min_fee):
-                break
-
-        total_lovelace_out = payment + min_fee
-        if utxo_total < total_lovelace_out:
-            raise ShelleyError(
-                f"Transaction failed due to insufficient funds. "
-                f"Account {from_addr} cannot send {amt} ADA plus fees to "
-                f"account {to_addr} because it only contains "
-                f"{utxo_total/1_000_000.} ADA."
-            )
-            # Maybe this should fail more gracefully, but higher level logic
-            # can also just catch the error and handle it.
-
-        # Determine the slot where the transaction will become invalid. Get the
-        # current slot number and add a buffer to it.
-        tip = self.get_tip()
-        ttl = tip + self.ttl_buffer
-
         # Build the transaction
-        tx_raw_file = Path(self.working_dir) / (tx_name + ".raw")
-        self.__run(
-            f"{self.cli} transaction build-raw{tx_in_str} "
-            f"--tx-out {to_addr}+{payment:.0f} "
-            f"--tx-out {from_addr}+{(utxo_total - total_lovelace_out):.0f} "
-            f"--ttl {ttl} --fee {min_fee} --out-file {tx_raw_file}"
+        tx_raw_file = self.build_raw_transaction(
+            from_addr,
+            witness_count=1,
+            receive_addrs=[to_addr],
+            payments=[payment],
+            certs=None,
+            deposits=0,
+            folder=None,
+            cleanup=cleanup,
         )
 
         # Sign the transaction with the signing key
-        tx_signed_file = Path(self.working_dir) / (tx_name + ".signed")
-        self.__run(
-            f"{self.cli} transaction sign "
-            f"--tx-body-file {tx_raw_file} --signing-key-file {key_file} "
-            f"{self.network} --out-file {tx_signed_file}"
-        )
+        tx_signed_file = self.sign_transaction(tx_raw_file, [key_file])
 
         # Delete the intermediate transaction files if specified.
         if cleanup:
-            self.__cleanup_file(tx_draft_file)
             self.__cleanup_file(tx_raw_file)
 
         # Submit the transaction
@@ -552,9 +490,7 @@ class ShelleyTools:
 
         return (kes_vkey, kes_skey)
 
-    def create_block_producing_keys(
-        self, genesis_file, pool_name="pool", folder=None
-    ):
+    def create_block_producing_keys(self, genesis_file, pool_name="pool", folder=None):
         """Create keys for a block-producing node.
         WARNING: You may want to use your local machine for this process
         (assuming you have cardano-node and cardano-cli on it). Make sure you
@@ -638,12 +574,7 @@ class ShelleyTools:
         return pool_id  # Return the pool id after first saving it to a file.
 
     def update_kes_keys(
-        self,
-        genesis_file,
-        cold_skey,
-        cold_counter,
-        pool_name="pool",
-        folder=None,
+        self, genesis_file, cold_skey, cold_counter, pool_name="pool", folder=None
     ):
         """Update KES keys for an existing stake pool.
 
@@ -711,9 +642,7 @@ class ShelleyTools:
         # Create a JSON file with the pool metadata and return the file hash.
         ticker = pool_metadata["ticker"]
         metadata_file_path = folder / f"{ticker}_metadata.json"
-        self.__dump_text_file(
-            metadata_file_path, json.dumps(pool_metadata).strip()
-        )
+        self.__dump_text_file(metadata_file_path, json.dumps(pool_metadata).strip())
         result = self.__run(
             f"{self.cli} stake-pool metadata-hash "
             f"--pool-metadata-file {metadata_file_path}"
@@ -857,9 +786,7 @@ class ShelleyTools:
         # Return the path to the generated pool cert
         return pool_cert_path
 
-    def generate_delegation_cert(
-        self, owner_stake_vkeys, pool_cold_vkey, folder=None
-    ):
+    def generate_delegation_cert(self, owner_stake_vkeys, pool_cold_vkey, folder=None):
         """Generate a delegation certificate for pledging.
 
         Parameters
@@ -912,8 +839,9 @@ class ShelleyTools:
         certs=None,
         deposits=0,
         folder=None,
+        cleanup=True,
     ) -> str:
-        """
+        """Build a raw (unsigned) transaction.
 
         Requires a running and synced node.
 
@@ -924,12 +852,15 @@ class ShelleyTools:
         receive_addrs : list, optional
             Address to receive payment.
         payments: list, optional
-            Payments corresponding to the list of receive addresses.
+            Payments (lovelaces) corresponding to the list of receive addresses.
         certs: list, optional
             List of certificate files to include in the transaction.
         deposits: int, optional
             Deposits
-        
+        cleanup : bool, optional
+            Flag that indicates if the temporary transaction files should be
+            removed when finished (defaults to True).
+
         Returns
         -------
         str
@@ -999,10 +930,7 @@ class ShelleyTools:
 
             # Calculate the minimum fee
             min_fee = self.calc_min_fee(
-                tx_draft_file,
-                utxo_count,
-                tx_out_count=1,
-                witness_count=witness_count,
+                tx_draft_file, utxo_count, tx_out_count=1, witness_count=witness_count
             )
 
             # If we have enough Lovelaces to cover the transaction can stop
@@ -1035,7 +963,7 @@ class ShelleyTools:
         if utxo_amt == 0:
             # The transaction is emptying the account. No UTXO.
             pass
-        elif utxo < self.protocol_parameters["minUTxOValue"]:
+        elif utxo_amt < self.protocol_parameters["minUTxOValue"]:
             # Verify that the UTXO is larger than the minimum.
             raise ShelleyError(
                 f"Transaction failed due to insufficient funds. Account "
@@ -1043,7 +971,7 @@ class ShelleyTools:
                 f"ADA because it only contains {utxo_total_ada} ADA."
             )
         else:
-            utxo_str = f"--tx-out {payment_addr}+{utxo}"
+            utxo_str = f"--tx-out {payment_addr}+{utxo_amt}"
 
         # Build the transaction to the blockchain.
         tx_raw_file = Path(self.working_dir) / (tx_name + ".raw")
@@ -1052,6 +980,10 @@ class ShelleyTools:
             f"{pymt_args} --ttl {ttl} --fee {min_fee} "
             f"--out-file {tx_raw_file} {cert_args}"
         )
+
+        # Delete the intermediate transaction files if specified.
+        if cleanup:
+            self.__cleanup_file(tx_draft_file)
 
         # Return the path to the raw transaction file.
         return tx_raw_file
@@ -1803,9 +1735,7 @@ class ShelleyTools:
         # Calculate the amount to withdraw.
         rewards = self.get_rewards_balance(stake_addr)
         if rewards <= 0.0:
-            raise ShelleyError(
-                f"No rewards availible in stake address {stake_addr}."
-            )
+            raise ShelleyError(f"No rewards availible in stake address {stake_addr}.")
         withdrawal_str = f"{stake_addr}+{rewards}"
 
         # Get a list of UTXOs and sort them in decending order by value.
@@ -2028,9 +1958,7 @@ class ShelleyTools:
         balance = sum(b["rewardAccountBalance"] for b in info)
         return balance
 
-    def empty_account(
-        self, to_addr, from_addr, key_file, offline=False, cleanup=True
-    ):
+    def empty_account(self, to_addr, from_addr, key_file, offline=False, cleanup=True):
         """Send all ADA contained in one address to another address.
 
         Parameters
