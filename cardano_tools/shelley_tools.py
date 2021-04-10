@@ -3,6 +3,7 @@ from datetime import datetime
 from pathlib import Path
 import subprocess
 import requests
+import shlex
 import json
 import sys
 import os
@@ -75,7 +76,7 @@ class ShelleyTools:
 
             # Execute the commands locally
             os.environ["CARDANO_NODE_SOCKET_PATH"] = self.socket
-            result = subprocess.run(cmd.split(), capture_output=True)
+            result = subprocess.run(shlex.split(cmd), capture_output=True)
             stdout = result.stdout.decode().strip()
             stderr = result.stderr.decode().strip()
             if self.debug:
@@ -86,7 +87,7 @@ class ShelleyTools:
         ResultType = namedtuple("Result", "stdout, stderr")
         return ResultType(stdout, stderr)
 
-    def __load_text_file(self, fpath):
+    def _load_text_file(self, fpath):
         if self.ssh is not None:
             # Open the connection
             self.ssh.open()
@@ -103,7 +104,7 @@ class ShelleyTools:
 
         return text
 
-    def __dump_text_file(self, fpath, datastr):
+    def _dump_text_file(self, fpath, datastr):
         if self.ssh is not None:
 
             # Run the commands remotely
@@ -116,7 +117,7 @@ class ShelleyTools:
             with open(fpath, "w") as outfile:
                 outfile.write(datastr)
 
-    def __download_file(self, url, fpath):
+    def _download_file(self, url, fpath):
         if self.ssh is not None:
 
             # Run the commands remotely
@@ -130,7 +131,7 @@ class ShelleyTools:
             with open(fpath, "wb") as download_file:
                 download_file.write(download.content)
 
-    def __cleanup_file(self, fpath):
+    def _cleanup_file(self, fpath):
         if self.ssh is not None:
 
             # Run the commands remotely
@@ -150,7 +151,7 @@ class ShelleyTools:
             f"{self.cli} query protocol-parameters {self.network} "
             f"{self.era} --out-file {params_file}"
         )
-        json_data = self.__load_text_file(params_file)
+        json_data = self._load_text_file(params_file)
         self.protocol_parameters = json.loads(json_data)
         return params_file
 
@@ -212,7 +213,7 @@ class ShelleyTools:
         )
 
         # Read the file and return the payment address.
-        addr = self.__load_text_file(payment_addr).strip()
+        addr = self._load_text_file(payment_addr).strip()
         return addr
 
     def get_key_hash(self, vkey_path) -> str:
@@ -234,18 +235,63 @@ class ShelleyTools:
         )
         return result.stdout
 
-    def get_utxos(self, addr) -> list:
+    def get_utxos(self, addr, filter=None) -> list:
         """Query the list of UTXOs for a given address and parse the output.
         The returned data is formatted as a list of dict objects.
+
+        Parameters
+        ----------
+        addr : str
+            Address for which to find the UTXOs.
+        filter : str, optional
+            Filter the UTXOs based on a token ID. If "Lovelace" is passed to
+            the filter, UTXOs containing ONLY lovelace will be returned.
+ 
+        Returns
+        -------
+        list
+            List of UTXOs parsed into dictionary objects.
         """
+
+        # Query the UTXOs for the given address (this will not get everything
+        # for a given wallet that contains multiple addresses.)
         result = self.run_cli(
             f"{self.cli} query utxo --address {addr} {self.network} {self.era}"
         )
         raw_utxos = result.stdout.split("\n")[2:]
+
+        # Parse the UTXOs into a list of dict objects
         utxos = []
         for utxo_line in raw_utxos:
             vals = utxo_line.split()
-            utxos.append({"TxHash": vals[0], "TxIx": vals[1], "Lovelace": vals[2]})
+            utxo_dict = {
+                "TxHash": vals[0],
+                "TxIx": vals[1],
+                "Lovelace": vals[2],
+            }
+
+            # Extra tokens will be separated by a "+" sign.
+            extra = [i for i, j in enumerate(vals) if j == "+"]
+            for i in extra:
+                asset = vals[i + 2]
+                amt = vals[i + 1]
+                if asset in utxo_dict:
+                    utxo_dict[asset] += amt
+                else:
+                    utxo_dict[asset] = amt
+            utxos.append(utxo_dict)
+
+        # Filter utxos
+        if filter is not None:
+            if filter == "Lovelace":
+                utxos = [
+                    utxo
+                    for utxo in utxos
+                    if filter in utxo and len(utxo.keys()) == 3
+                ]
+            else:
+                utxos = [utxo for utxo in utxos if filter in utxo]
+
         return utxos
 
     def query_balance(self, addr) -> int:
@@ -258,7 +304,12 @@ class ShelleyTools:
         return total
 
     def calc_min_fee(
-        self, tx_draft, tx_in_count, tx_out_count, witness_count, byron_witness_count=0
+        self,
+        tx_draft,
+        tx_in_count,
+        tx_out_count,
+        witness_count,
+        byron_witness_count=0,
     ) -> int:
         """Calculate the minimum fee in lovelaces for the transaction.
 
@@ -335,7 +386,7 @@ class ShelleyTools:
 
         # Delete the intermediate transaction files if specified.
         if cleanup:
-            self.__cleanup_file(tx_raw_file)
+            self._cleanup_file(tx_raw_file)
 
         # Submit the transaction
         if not offline:
@@ -460,8 +511,8 @@ class ShelleyTools:
 
         # Delete the intermediate transaction files if specified.
         if cleanup:
-            self.__cleanup_file(tx_draft_file)
-            self.__cleanup_file(tx_raw_file)
+            self._cleanup_file(tx_draft_file)
+            self._cleanup_file(tx_raw_file)
 
         # Submit the transaction
         if not offline:
@@ -509,7 +560,9 @@ class ShelleyTools:
 
         return (kes_vkey, kes_skey)
 
-    def create_block_producing_keys(self, genesis_file, pool_name="pool", folder=None):
+    def create_block_producing_keys(
+        self, genesis_file, pool_name="pool", folder=None
+    ):
         """Create keys for a block-producing node.
         WARNING: You may want to use your local machine for this process
         (assuming you have cardano-node and cardano-cli on it). Make sure you
@@ -567,7 +620,7 @@ class ShelleyTools:
         self.generate_kes_keys(pool_name, folder)
 
         # Get the network genesis parameters
-        json_data = self.__load_text_file(genesis_file)
+        json_data = self._load_text_file(genesis_file)
         genesis_parameters = json.loads(json_data)
 
         # Generate the Operational Certificate/
@@ -588,12 +641,17 @@ class ShelleyTools:
             f"{self.cli} stake-pool id " f"--verification-key-file {cold_vkey}"
         )
         pool_id = result.stdout
-        self.__dump_text_file(folder / (pool_name + ".id"), pool_id)
+        self._dump_text_file(folder / (pool_name + ".id"), pool_id)
 
         return pool_id  # Return the pool id after first saving it to a file.
 
     def update_kes_keys(
-        self, genesis_file, cold_skey, cold_counter, pool_name="pool", folder=None
+        self,
+        genesis_file,
+        cold_skey,
+        cold_counter,
+        pool_name="pool",
+        folder=None,
     ):
         """Update KES keys for an existing stake pool.
 
@@ -627,7 +685,7 @@ class ShelleyTools:
 
         # Generate the new pool operation certificate
         # Get the network genesis parameters
-        json_data = self.__load_text_file(genesis_file)
+        json_data = self._load_text_file(genesis_file)
         genesis_parameters = json.loads(json_data)
 
         # Generate the Operational Certificate
@@ -661,7 +719,9 @@ class ShelleyTools:
         # Create a JSON file with the pool metadata and return the file hash.
         ticker = pool_metadata["ticker"]
         metadata_file_path = folder / f"{ticker}_metadata.json"
-        self.__dump_text_file(metadata_file_path, json.dumps(pool_metadata).strip())
+        self._dump_text_file(
+            metadata_file_path, json.dumps(pool_metadata).strip()
+        )
         result = self.run_cli(
             f"{self.cli} stake-pool metadata-hash "
             f"--pool-metadata-file {metadata_file_path}"
@@ -748,7 +808,7 @@ class ShelleyTools:
         if pool_metadata_url is not None:
             if pool_metadata_hash is None:
                 metadata_file = folder / "metadata_file_download.json"
-                self.__download_file(pool_metadata_url, metadata_file)
+                self._download_file(pool_metadata_url, metadata_file)
                 result = self.run_cli(
                     f"{self.cli} stake-pool metadata-hash "
                     f"--pool-metadata-file {metadata_file}"
@@ -805,7 +865,9 @@ class ShelleyTools:
         # Return the path to the generated pool cert
         return pool_cert_path
 
-    def generate_delegation_cert(self, owner_stake_vkeys, pool_cold_vkey, folder=None):
+    def generate_delegation_cert(
+        self, owner_stake_vkeys, pool_cold_vkey, folder=None
+    ):
         """Generate a delegation certificate for pledging.
 
         Parameters
@@ -917,7 +979,7 @@ class ShelleyTools:
                 pymt_args += f"--tx-out {addr}+{amt:.0f} "
 
         # Get a list of UTXOs and sort them in decending order by value.
-        utxos = self.get_utxos(payment_addr)
+        utxos = self.get_utxos(payment_addr, filter="Lovelace")
         utxos.sort(key=lambda k: k["Lovelace"], reverse=True)
 
         # Determine the TTL
@@ -949,7 +1011,10 @@ class ShelleyTools:
 
             # Calculate the minimum fee
             min_fee = self.calc_min_fee(
-                tx_draft_file, utxo_count, tx_out_count=1, witness_count=witness_count
+                tx_draft_file,
+                utxo_count,
+                tx_out_count=1,
+                witness_count=witness_count,
             )
 
             # If we have enough Lovelaces to cover the transaction can stop
@@ -1002,10 +1067,86 @@ class ShelleyTools:
 
         # Delete the intermediate transaction files if specified.
         if cleanup:
-            self.__cleanup_file(tx_draft_file)
+            self._cleanup_file(tx_draft_file)
 
         # Return the path to the raw transaction file.
         return tx_raw_file
+
+    def build_multisignature_scripts(
+        self,
+        script_name,
+        key_hashes,
+        sig_type,
+        required=None,
+        start_slot=None,
+        end_slot=None,
+        folder=None,
+    ) -> str:
+        """Helper function for building multi-signature scripts.
+
+        This script is not required as the multi-signature scripts may be created by hand.
+
+        Parameters
+        ----------
+        name : str
+            Name of the script
+        key_hashes : list
+            List of key hashes (use get_key_hash)
+        sig_type : str
+            Signature type (all, any, atLeast)
+        required : int, optional
+            Number of required signatures (used with type="atLeast")
+        start_slot : int, optional
+            Lower bound on slots where minting is allowed 
+        end_slot : int, optional
+            Upper bound on slots where minting is allowed
+
+        Returns
+        -------
+        str
+            Path to the multi-signature script file.
+        """
+
+        # Get a working directory to store the generated files and make sure
+        # the directory exists.
+        if folder is None:
+            folder = self.working_dir
+        else:
+            folder = Path(folder)
+            if self.ssh is None:
+                folder.mkdir(parents=True, exist_ok=True)
+            else:
+                self.run_cli(f'mkdir -p "{folder}"')
+
+        # Build the list of signature hashes
+        script = {
+            "scripts": [{"keyHash": h, "type": "sig"} for h in key_hashes]
+        }
+
+        # Determine the type. Default to all
+        sig_type = sig_type.lower()
+        if sig_type == "any":
+            script["type"] = "any"
+        elif sig_type == "atleast" and required is not None:
+            script["type"] = "atLeast"
+            script["required"] = int(required)
+            if script["required"] < 1 or script["required"] >= len(key_hashes):
+                raise ShelleyError("Invalid number of required signatures.")
+        else:
+            script["type"] = "all"
+
+        # Add bounds
+        if start_slot is not None:
+            script["scripts"].append({"slot": start_slot, "type": "after"})
+        if end_slot is not None:
+            script["scripts"].append({"slot": start_slot, "type": "before"})
+
+        # Write the script file
+        file_path = Path(folder) / (script_name + ".json")
+        with open(file_path, "w") as outfile:
+            json.dump(script, outfile, indent=4)
+
+        return file_path
 
     def witness_transaction(self, tx_file, witnesses) -> str:
         """Sign a transaction file with witness file(s).
@@ -1040,7 +1181,7 @@ class ShelleyTools:
         # Return the path to the signed file for downstream use.
         return tx_signed_file
 
-    def sign_transaction(self, tx_file, skeys) -> str:
+    def sign_transaction(self, tx_file, skeys, script=None) -> str:
         """Sign a transaction file with a signing key.
 
         Parameters
@@ -1049,6 +1190,8 @@ class ShelleyTools:
             Path to the transaction file to be signed.
         skeys : list
             List of paths (str or Path) to the signing key files.
+        script : str, Path, optional
+            Path to the multi-signature script.
         
         Returns
         -------
@@ -1061,12 +1204,17 @@ class ShelleyTools:
         for key_path in skeys:
             signing_key_args += f"--signing-key-file {key_path} "
 
+        # Multi-signature Script
+        script_str = ""
+        if script is not None:
+            script_str = f" --script-file {script} "
+        
         # Sign the transaction with the signing key
         tx_name = Path(tx_file).stem
         tx_signed_file = tx_name + ".signed"
         self.run_cli(
             f"{self.cli} transaction sign "
-            f"--tx-body-file {tx_file} {signing_key_args}"
+            f"--tx-body-file {tx_file} {signing_key_args} {script_str}"
             f"{self.network} --out-file {tx_signed_file}"
         )
 
@@ -1094,7 +1242,7 @@ class ShelleyTools:
 
         # Delete the transaction files if specified.
         if cleanup:
-            self.__cleanup_file(signed_tx_file)
+            self._cleanup_file(signed_tx_file)
 
     def register_stake_pool(
         self,
@@ -1218,7 +1366,7 @@ class ShelleyTools:
             signing_key_args += f"--signing-key-file {key_path} "
 
         # Get the pool deposit from the network genesis parameters.
-        json_data = self.__load_text_file(genesis_file)
+        json_data = self._load_text_file(genesis_file)
         pool_deposit = json.loads(json_data)["protocolParams"]["poolDeposit"]
 
         # Get a list of UTXOs and sort them in decending order by value.
@@ -1291,8 +1439,8 @@ class ShelleyTools:
 
         # Delete the transaction files if specified.
         if cleanup:
-            self.__cleanup_file(tx_draft_file)
-            self.__cleanup_file(tx_raw_file)
+            self._cleanup_file(tx_draft_file)
+            self._cleanup_file(tx_raw_file)
 
         # Submit the transaction
         if not offline:
@@ -1399,7 +1547,7 @@ class ShelleyTools:
         if pool_metadata_url is not None:
             if pool_metadata_hash is None:
                 metadata_file = folder / "metadata_file_download.json"
-                self.__download_file(pool_metadata_url, metadata_file)
+                self._download_file(pool_metadata_url, metadata_file)
                 result = self.run_cli(
                     f"{self.cli} stake-pool metadata-hash "
                     f"--pool-metadata-file {metadata_file}"
@@ -1545,8 +1693,8 @@ class ShelleyTools:
 
         # Delete the transaction files if specified.
         if cleanup:
-            self.__cleanup_file(tx_draft_file)
-            self.__cleanup_file(tx_raw_file)
+            self._cleanup_file(tx_draft_file)
+            self._cleanup_file(tx_raw_file)
 
         # Submit the transaction
         if not offline:
@@ -1692,9 +1840,9 @@ class ShelleyTools:
 
         # Delete the transaction files if specified.
         if cleanup:
-            self.__cleanup_file(tx_draft_file)
-            self.__cleanup_file(tx_raw_file)
-            self.__cleanup_file(tx_signed_file)
+            self._cleanup_file(tx_draft_file)
+            self._cleanup_file(tx_raw_file)
+            self._cleanup_file(tx_signed_file)
 
     def get_stake_pool_id(self, cold_vkey) -> str:
         """Return the stake pool ID associated with the supplied cold key.
@@ -1754,7 +1902,9 @@ class ShelleyTools:
         # Calculate the amount to withdraw.
         rewards = self.get_rewards_balance(stake_addr)
         if rewards <= 0.0:
-            raise ShelleyError(f"No rewards availible in stake address {stake_addr}.")
+            raise ShelleyError(
+                f"No rewards availible in stake address {stake_addr}."
+            )
         withdrawal_str = f"{stake_addr}+{rewards}"
 
         # Get a list of UTXOs and sort them in decending order by value.
@@ -1863,8 +2013,8 @@ class ShelleyTools:
 
         # Delete the intermediate transaction files if specified.
         if cleanup:
-            self.__cleanup_file(tx_draft_file)
-            self.__cleanup_file(tx_raw_file)
+            self._cleanup_file(tx_draft_file)
+            self._cleanup_file(tx_raw_file)
 
         # Submit the transaction
         if not offline:
@@ -1949,7 +2099,7 @@ class ShelleyTools:
         )
 
         # Read the file and return the staking address.
-        addr = self.__load_text_file(addr_file).strip()
+        addr = self._load_text_file(addr_file).strip()
         return addr
 
     def get_rewards_balance(self, stake_addr) -> int:
@@ -1977,7 +2127,9 @@ class ShelleyTools:
         balance = sum(b["rewardAccountBalance"] for b in info)
         return balance
 
-    def empty_account(self, to_addr, from_addr, key_file, offline=False, cleanup=True):
+    def empty_account(
+        self, to_addr, from_addr, key_file, offline=False, cleanup=True
+    ):
         """Send all ADA contained in one address to another address.
 
         Parameters
@@ -2055,8 +2207,8 @@ class ShelleyTools:
 
         # Delete the intermediate transaction files if specified.
         if cleanup:
-            self.__cleanup_file(tx_draft_file)
-            self.__cleanup_file(tx_raw_file)
+            self._cleanup_file(tx_draft_file)
+            self._cleanup_file(tx_raw_file)
 
         # Submit the transaction
         if not offline:
