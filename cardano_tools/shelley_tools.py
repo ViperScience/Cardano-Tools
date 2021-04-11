@@ -149,7 +149,7 @@ class ShelleyTools:
         params_file = self.working_dir / "protocol.json"
         self.run_cli(
             f"{self.cli} query protocol-parameters {self.network} "
-            f"{self.era} --out-file {params_file}"
+            f"--out-file {params_file}"
         )
         json_data = self._load_text_file(params_file)
         self.protocol_parameters = json.loads(json_data)
@@ -160,10 +160,10 @@ class ShelleyTools:
         """
         cmd = f"{self.cli} query tip {self.network}"
         result = self.run_cli(cmd)
-        if "slotNo" not in result.stdout:
+        if "slot" not in result.stdout:
             raise ShelleyError(result.stderr)
         vals = json.loads(result.stdout)
-        return vals["slotNo"]
+        return vals["slot"]
 
     def make_address(self, name, folder=None) -> str:
         """Create an address and the corresponding payment and staking keys.
@@ -256,7 +256,7 @@ class ShelleyTools:
         # Query the UTXOs for the given address (this will not get everything
         # for a given wallet that contains multiple addresses.)
         result = self.run_cli(
-            f"{self.cli} query utxo --address {addr} {self.network} {self.era}"
+            f"{self.cli} query utxo --address {addr} {self.network}"
         )
         raw_utxos = result.stdout.split("\n")[2:]
 
@@ -988,6 +988,7 @@ class ShelleyTools:
 
         # Ensure the parameters file exists
         self.load_protocol_parameters()
+        min_utxo = self.shelley.protocol_parameters["minUTxOValue"]
 
         # Iterate through the UTXOs until we have enough funds to cover the
         # transaction. Also, create the tx_in string for the transaction.
@@ -1020,7 +1021,8 @@ class ShelleyTools:
             # If we have enough Lovelaces to cover the transaction can stop
             # iterating through the UTXOs.
             lovelaces_out = min_fee + deposits + total_payments
-            if utxo_total > lovelaces_out:
+            utxo_amt = utxo_total - lovelaces_out
+            if utxo_total > lovelaces_out and (utxo_amt > min_utxo or utxo_amt == 0):
                 break
 
         # Handle the error case where there is not enough inputs for the output
@@ -1043,7 +1045,6 @@ class ShelleyTools:
 
         # Setup the new UTXO
         utxo_str = ""
-        utxo_amt = utxo_total - lovelaces_out
         if utxo_amt == 0:
             # The transaction is emptying the account. No UTXO.
             pass

@@ -76,6 +76,23 @@ class MaryTools:
         )
         return result.stdout
 
+    # def calc_min_utxo(self, ):
+    #     """Calculate the minimum UTxO value when assets are part of the 
+    #     transaction.
+
+    #     """
+    #     def round_up_bytes_to_words(b):
+    #         return (b + 7) // 8
+    #     coin_Size = 0
+    #     utxo_entry_size_without_val = 27
+    #     ada_only_utxo_size = utxo_entry_size_without_val + coin_Size
+    #     num_assets = len(asset_names)
+    #     num_pids = 1
+    #     sum_asset_name_lengths = sum([len(s.encode('utf-8')) for s in asset_names])
+    #     pid_size = len(policy_id) // 2
+    #     size_bytes = 6 + round_up_bytes_to_words(((num_assets) * 12) + sum_asset_name_lengths + (num_pids * pid_size))
+    #     min_output = max([min_utxo, min_utxo // ada_only_utxo_size * (utxo_entry_size_without_val + size_bytes)])
+
     def build_mint_transaction(
         self,
         quantity,
@@ -245,12 +262,12 @@ class MaryTools:
         ----------
         Parameters
         ----------
-        quantity : list
+        quantities : list
             List of the numbers of each asset to mint.
         policy_id : str
             The minting policy ID generated from the signature script--the 
             same for all assets.
-        asset_name : list
+        asset_names : list
             List of asset names (same size as quantity list).
         payment_addr : str
             The address paying the minting fees. Will also own the tokens.
@@ -295,6 +312,20 @@ class MaryTools:
 
         # Ensure the parameters file exists
         self.shelley.load_protocol_parameters()
+        min_utxo = self.shelley.protocol_parameters["minUTxOValue"]
+
+        # Calculate the minimum UTxO
+        def round_up_bytes_to_words(b):
+            return (b + 7) // 8
+        coin_Size = 0
+        utxo_entry_size_without_val = 27
+        ada_only_utxo_size = utxo_entry_size_without_val + coin_Size
+        num_assets = len(asset_names)
+        num_pids = 1
+        sum_asset_name_lengths = sum([len(s.encode('utf-8')) for s in asset_names])
+        pid_size = len(policy_id) // 2
+        size_bytes = 6 + round_up_bytes_to_words(((num_assets) * 12) + sum_asset_name_lengths + (num_pids * pid_size))
+        min_output = max([min_utxo, min_utxo // ada_only_utxo_size * (utxo_entry_size_without_val + size_bytes)])
 
         # Create minting string
         for i, name in enumerate(asset_names):
@@ -335,7 +366,7 @@ class MaryTools:
 
             # If we have enough Lovelaces to cover the transaction can stop
             # iterating through the UTXOs.
-            if utxo_total > min_fee:
+            if utxo_total > (min_fee + min_output):
                 break
 
         # Handle the error case where there is not enough inputs for the output
@@ -358,13 +389,12 @@ class MaryTools:
 
         # Setup the new UTXO
         utxo_amt = utxo_total - min_fee
-        print(utxo_amt)
-        if utxo_amt < self.shelley.protocol_parameters["minUTxOValue"]:
+        if utxo_amt < min_output:
             # Verify that the UTXO is larger than the minimum.
             raise MaryError(
-                f"Transaction failed due to insufficient funds. Account "
-                f"{payment_addr} cannot pay tranction costs of {cost_ada} "
-                f"ADA because it only contains {utxo_total_ada} ADA."
+                f"Transaction failed due to insufficient funds. The UTxO is "
+                f"{utxo_amt} lovelace which is smaller than the minimum UTxO "
+                f"of {min_output} lovelace."
             )
 
         # Build the transaction to the blockchain.
