@@ -477,7 +477,7 @@ class ShelleyTools:
             )
 
             # TX cost
-            cost = min_fee + self.protocol_parameters["keyDeposit"]
+            cost = min_fee + self.protocol_parameters["stakeAddressDeposit"]
             if utxo_total > cost:
                 break
 
@@ -617,7 +617,7 @@ class ShelleyTools:
         )
 
         # Generate the KES Key pair
-        self.generate_kes_keys(pool_name, folder)
+        kes_vkey, kes_skey = self.generate_kes_keys(pool_name, folder)
 
         # Get the network genesis parameters
         json_data = self._load_text_file(genesis_file)
@@ -638,7 +638,8 @@ class ShelleyTools:
 
         # Get the pool ID and return it.
         result = self.run_cli(
-            f"{self.cli} stake-pool id " f"--verification-key-file {cold_vkey}"
+            f"{self.cli} stake-pool id "
+            f"--cold-verification-key-file {cold_vkey}"
         )
         pool_id = result.stdout
         self._dump_text_file(folder / (pool_name + ".id"), pool_id)
