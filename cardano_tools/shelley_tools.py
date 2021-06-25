@@ -989,7 +989,7 @@ class ShelleyTools:
 
         # Ensure the parameters file exists
         self.load_protocol_parameters()
-        min_utxo = self.shelley.protocol_parameters["minUTxOValue"]
+        min_utxo = self.protocol_parameters["minUTxOValue"]
 
         # Iterate through the UTXOs until we have enough funds to cover the
         # transaction. Also, create the tx_in string for the transaction.
@@ -2119,7 +2119,7 @@ class ShelleyTools:
         """
         result = self.run_cli(
             f"{self.cli} query stake-address-info --address "
-            f"{stake_addr} {self.network} {self.era}"
+            f"{stake_addr} {self.network}"
         )
         if "Failed" in result.stdout:
             raise ShelleyError(result.stdout)
