@@ -1214,11 +1214,14 @@ class ShelleyTools:
         # Sign the transaction with the signing key
         tx_name = Path(tx_file).stem
         tx_signed_file = tx_name + ".signed"
-        self.run_cli(
+        result = self.run_cli(
             f"{self.cli} transaction sign "
             f"--tx-body-file {tx_file} {signing_key_args} {script_str}"
             f"{self.network} --out-file {tx_signed_file}"
         )
+
+        if result.stderr:
+            raise ShelleyError(f"Unable to sign transaction: {result.stderr}")
 
         # Return the path to the signed file for downstream use.
         return tx_signed_file
@@ -1237,10 +1240,13 @@ class ShelleyTools:
         """
 
         # Submit the transaction
-        self.run_cli(
+        result = self.run_cli(
             f"{self.cli} transaction submit "
             f"--tx-file {signed_tx_file} {self.network}"
         )
+
+        if result.stderr:
+            raise ShelleyError(f"Unable to submit transaction: {result.stderr}")
 
         # Delete the transaction files if specified.
         if cleanup:
