@@ -694,13 +694,17 @@ class ShelleyTools:
         slots_kes_period = genesis_parameters["slotsPerKESPeriod"]
         tip = self.get_tip()
         kes_period = tip // slots_kes_period  # Integer division
-        self.run_cli(
+        result = self.run_cli(
             f"{self.cli} node issue-op-cert "
             f"--kes-verification-key-file {kes_vkey} "
             f"--cold-signing-key-file {cold_skey} "
             f"--operational-certificate-issue-counter {cold_counter} "
             f"--kes-period {kes_period} --out-file {cert_file}"
         )
+
+        if result.stderr:
+            raise ShelleyError(f"Unable to rotate KES keys: {result.stderr}")
+
 
     def create_metadata_file(self, pool_metadata, folder=None) -> str:
         """ Create a JSON file with the pool metadata and return the file hash.
@@ -1027,6 +1031,8 @@ class ShelleyTools:
                 break
 
         # Handle the error case where there is not enough inputs for the output
+        cost_ada = lovelaces_out / 1_000_000
+        utxo_total_ada = utxo_total / 1_000_000
         if utxo_total < lovelaces_out:
             # This is the case where the sending wallet has no UTXOs to spend.
             # The above for loop didn't run at all which is why the
@@ -1035,9 +1041,7 @@ class ShelleyTools:
                 raise ShelleyError(
                     f"Transaction failed due to insufficient funds. Account "
                     f"{payment_addr} is empty."
-                )
-            cost_ada = lovelaces_out / 1_000_000
-            utxo_total_ada = utxo_total / 1_000_000
+                )    
             raise ShelleyError(
                 f"Transaction failed due to insufficient funds. Account "
                 f"{payment_addr} cannot pay tranction costs of {cost_ada} "
@@ -1049,12 +1053,14 @@ class ShelleyTools:
         if utxo_amt == 0:
             # The transaction is emptying the account. No UTXO.
             pass
-        elif utxo_amt < self.protocol_parameters["minUTxOValue"]:
+        elif utxo_amt < min_utxo:
             # Verify that the UTXO is larger than the minimum.
             raise ShelleyError(
                 f"Transaction failed due to insufficient funds. Account "
                 f"{payment_addr} cannot pay tranction costs of {cost_ada} "
-                f"ADA because it only contains {utxo_total_ada} ADA."
+                f"ADA because it only contains {utxo_total_ada} ADA "
+                f"resulting in an UTxO of {utxo_total_ada - cost_ada} ADA "
+                f"which is less than the minimum of {min_utxo / 1_000_000}."
             )
         else:
             utxo_str = f"--tx-out {payment_addr}+{utxo_amt}"
@@ -2163,7 +2169,7 @@ class ShelleyTools:
         # Build a transaction name
         tx_name = datetime.now().strftime("empty_acct_%Y-%m-%d_%Hh%Mm%Ss")
 
-        # Get a list of UTXOs and create tx_in string.
+        # Get a list of UTxOs and create the tx_in string.
         tx_in_str = ""
         utxos = self.get_utxos(from_addr)
         for utxo in utxos:
@@ -2206,16 +2212,10 @@ class ShelleyTools:
         )
 
         # Sign the transaction with the signing key
-        tx_signed_file = Path(self.working_dir) / (tx_name + ".signed")
-        self.run_cli(
-            f"{self.cli} transaction sign "
-            f"--tx-body-file {tx_raw_file} --signing-key-file {key_file} "
-            f"{self.network} --out-file {tx_signed_file}"
-        )
+        tx_signed_file = self.sign_transaction(tx_raw_file, [key_file])
 
         # Delete the intermediate transaction files if specified.
         if cleanup:
-            self._cleanup_file(tx_draft_file)
             self._cleanup_file(tx_raw_file)
 
         # Submit the transaction
