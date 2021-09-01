@@ -1,5 +1,6 @@
 from datetime import datetime
 from pathlib import Path
+from sys import breakpointhook
 
 # Cardano-Tools components
 from .shelley_tools import ShelleyTools
@@ -128,10 +129,7 @@ class MaryTools:
         )
         return result.stdout
 
-    def calc_min_utxo(
-        self,
-        assets,
-    ) -> int:
+    def calc_min_utxo(self, assets) -> int:
         """Calculate the minimum UTxO value when assets are part of the
         transaction.
 
@@ -239,6 +237,14 @@ class MaryTools:
             removed when finished (defaults to True).
         """
 
+        # This is a constant modifier to determine the minimum ADA for breaking
+        # off additional ADA into a separate UTxO. It essentially prevents
+        # oscillations at potential bifurcation points where adding or taking
+        # away a transaction output puts the extra ADA under or over the
+        # minimum UTxO due to transaction fees. This parameter may need to be
+        # tuned bust should be fairly small.
+        minMult = 1.1
+
         # Get a working directory to store the generated files and make sure
         # the directory exists.
         if folder is None:
@@ -271,34 +277,7 @@ class MaryTools:
         for token in return_tokens.keys():
             return_token_utxo_str += f" + {return_tokens[token]} {token}"
 
-        # Determine the TTL
-        tip = self.shelley.get_tip()
-        ttl = tip + self.shelley.ttl_buffer
-
-        # Ensure the parameters file exists
-        self.shelley.load_protocol_parameters()
-        min_utxo = self.shelley.protocol_parameters["minUTxOValue"]
-
-        # Create a metadata string
-        meta_str = ""  # Maybe add later
-
-        # Calculate the minimum fee and UTxO sizes for the transaction as it is
-        # right now with only the minimum UTxOs needed for the tokens.
-        tx_name = datetime.now().strftime("tx_%Y-%m-%d_%Hh%Mm%Ss")
-        tx_draft_file = Path(self.shelley.working_dir) / (tx_name + ".draft")
-        self.shelley.run_cli(
-            f"{self.shelley.cli} transaction build-raw {input_str}"
-            f'--tx-out "{to_addr}+0{output_token_utxo_str}" '
-            f'--tx-out "{from_addr}+0{return_token_utxo_str}" '
-            f"--ttl 0 --fee 0 {meta_str} "
-            f"{self.shelley.era} --out-file {tx_draft_file}"
-        )
-        min_fee = self.shelley.calc_min_fee(
-            tx_draft_file,
-            input_str.count("--tx-in "),
-            tx_out_count=1,
-            witness_count=1,
-        )
+        # Calculate the minimum ADA for the token UTxOs.
         min_utxo_out = self.calc_min_utxo(output_tokens.keys())
         min_utxo_ret = self.calc_min_utxo(return_tokens.keys())
 
@@ -310,14 +289,68 @@ class MaryTools:
         if len(return_tokens) == 0:
             utxo_ret = 0
 
+        # Determine the TTL
+        tip = self.shelley.get_tip()
+        ttl = tip + self.shelley.ttl_buffer
+
+        # Ensure the parameters file exists
+        self.shelley.load_protocol_parameters()
+        min_utxo = self.shelley.protocol_parameters["minUTxOValue"]
+
+        # Create a metadata string
+        meta_str = ""  # Maybe add later
+
+        # Get a list of Lovelace only UTxOs and sort them in ascending order
+        # by value. We may not end up needing these.
+        ada_utxos = self.shelley.get_utxos(from_addr, filter="Lovelace")
+        ada_utxos.sort(key=lambda k: k["Lovelace"], reverse=False)
+
+        # Create a name for the transaction files.
+        tx_name = datetime.now().strftime("tx_%Y-%m-%d_%Hh%Mm%Ss")
+        tx_draft_file = Path(self.shelley.working_dir) / (tx_name + ".draft")
+
+        # Create a TX out string given the possible scenarios.
+        use_ada_utxo = False
+        if len(return_tokens) == 0:
+            if (input_lovelace - utxo_out) < minMult * min_utxo:
+                output_str = f'--tx-out "{to_addr}+0{output_token_utxo_str}" '
+            else:
+                output_str = (
+                    f'--tx-out "{to_addr}+0{output_token_utxo_str}" '
+                    f'--tx-out "{from_addr}+0" '
+                )
+                use_ada_utxo = True
+        else:
+            if (input_lovelace - utxo_out - utxo_ret) < minMult * min_utxo:
+                output_str = (
+                    f'--tx-out "{to_addr}+0{output_token_utxo_str}" '
+                    f'--tx-out "{from_addr}+0{return_token_utxo_str}" '
+                )
+            else:
+                output_str = (
+                    f'--tx-out "{to_addr}+0{output_token_utxo_str}" '
+                    f'--tx-out "{from_addr}+0{return_token_utxo_str}" '
+                    f'--tx-out "{from_addr}+0" '
+                )
+                use_ada_utxo = True
+
+        # Calculate the minimum transaction fee as it is right now with only the
+        # minimum UTxOs needed for the tokens.
+        self.shelley.run_cli(
+            f"{self.shelley.cli} transaction build-raw {input_str}"
+            f"{output_str} --ttl 0 --fee 0 {meta_str} "
+            f"{self.shelley.era} --out-file {tx_draft_file}"
+        )
+        min_fee = self.shelley.calc_min_fee(
+            tx_draft_file,
+            input_str.count("--tx-in "),
+            tx_out_count=output_str.count("--tx-out "),
+            witness_count=1,
+        )
+
         # If we don't have enough ADA, we will have to add another UTxO to cover
         # the transaction fees.
         if input_lovelace < (min_fee + utxo_ret + utxo_out):
-
-            # Get a list of Lovelace only UTxOs and sort them in ascending order
-            # by value.
-            ada_utxos = self.shelley.get_utxos(from_addr, filter="Lovelace")
-            ada_utxos.sort(key=lambda k: k["Lovelace"], reverse=False)
 
             # Iterate through the UTxOs until we have enough funds to cover the
             # transaction. Also, update the tx_in string for the transaction.
@@ -325,27 +358,49 @@ class MaryTools:
                 input_lovelace += int(utxo["Lovelace"])
                 input_str += f"--tx-in {utxo['TxHash']}#{utxo['TxIx']} "
 
-                # Build a transaction draft
                 self.shelley.run_cli(
                     f"{self.shelley.cli} transaction build-raw {input_str}"
-                    f'--tx-out "{to_addr}+0{output_token_utxo_str}" '
-                    f'--tx-out "{from_addr}+0{return_token_utxo_str}" '
-                    f"--ttl 0 --fee 0 {meta_str} "
+                    f"{output_str} --ttl 0 --fee 0 {meta_str} "
                     f"{self.shelley.era} --out-file {tx_draft_file}"
                 )
-
-                # Calculate the minimum fee
                 min_fee = self.shelley.calc_min_fee(
                     tx_draft_file,
                     input_str.count("--tx-in "),
-                    tx_out_count=1,
+                    tx_out_count=output_str.count("--tx-out "),
                     witness_count=1,
                 )
 
-                # If we have enough Lovelaces to cover the transaction, we can
-                # stop iterating through the UTxOs.
-                if input_lovelace > (min_fee + utxo_ret + utxo_out):
-                    break
+                # If we don't have enough ADA here, then go ahead and add another
+                # ADA only UTxO.
+                if input_lovelace < (min_fee + utxo_ret + utxo_out):
+                    continue
+
+                # If we do have enough to cover the needed output and fees, check
+                # if we need to add a second UTxO with the extra ADA.
+                if (
+                    input_lovelace - (min_fee + utxo_ret + utxo_out)
+                    > minMult * min_utxo
+                    and output_str.count("--tx-out ") < 3
+                ):
+
+                    self.shelley.run_cli(
+                        f"{self.shelley.cli} transaction build-raw {input_str}"
+                        f"{output_str} --tx-out {from_addr}+0 "
+                        f"--ttl 0 --fee 0 {meta_str} "
+                        f"{self.shelley.era} --out-file {tx_draft_file}"
+                    )
+                    min_fee = self.shelley.calc_min_fee(
+                        tx_draft_file,
+                        input_str.count("--tx-in "),
+                        tx_out_count=output_str.count("--tx-out "),
+                        witness_count=1,
+                    )
+
+                    # Flag that we are using an extra ADA only UTxO.
+                    use_ada_utxo = True
+
+                # We should be good here
+                break  # <-- Important!
 
         # Handle the error case where there is not enough inputs for the output
         if input_lovelace < (min_fee + utxo_ret + utxo_out):
@@ -358,17 +413,16 @@ class MaryTools:
         # If we have tokens being returned to the wallet, only keep the minimum
         # ADA in that UTxO and make an extra ADA only UTxO.
         utxo_ret_ada = 0
-        if input_lovelace > min_fee + utxo_ret + utxo_out:
+        if use_ada_utxo:
             if len(return_tokens) == 0:
                 utxo_ret_ada = input_lovelace - utxo_out - min_fee
-                if utxo_ret_ada < min_utxo:
-                    min_fee += utxo_ret_ada
-                    utxo_ret_ada = 0
             else:
                 utxo_ret_ada = input_lovelace - utxo_ret - utxo_out - min_fee
-                if utxo_ret_ada < min_utxo:
-                    utxo_ret += utxo_ret_ada
-                    utxo_ret_ada = 0
+        else:
+            if len(return_tokens) == 0:
+                min_fee += input_lovelace - utxo_out - min_fee
+            else:
+                utxo_ret += input_lovelace - utxo_ret - utxo_out - min_fee
 
         # Build the transaction to send to the blockchain.
         token_return_utxo_str = ""
@@ -380,6 +434,7 @@ class MaryTools:
         if utxo_ret_ada > 0:
             token_return_ada_str = f"--tx-out {from_addr}+{utxo_ret_ada}"
         tx_raw_file = Path(self.shelley.working_dir) / (tx_name + ".raw")
+
         self.shelley.run_cli(
             f"{self.shelley.cli} transaction build-raw {input_str}"
             f'--tx-out "{to_addr}+{utxo_out}{output_token_utxo_str}" '
@@ -397,64 +452,14 @@ class MaryTools:
 
     def build_mint_transaction(
         self,
-        quantity,
-        policy_id,
-        asset_name,
-        payment_addr,
-        witness_count,
-        tx_metadata=None,
-        folder=None,
-        cleanup=True,
-    ) -> str:
-        """Build the transaction for minting a new native asset.
-
-        Requires a running and synced node.
-
-        Parameters
-        ----------
-        quantity : int
-            The number of the assets to mint.
-        policy_id : str
-            The minting policy ID (generated from the signature script).
-        asset_name : str
-            The name of the asset.
-        payment_addr : str
-            The address paying the minting fees. Will also own the tokens.
-        witness_count : int
-            The number of signing keys.
-        tx_metadata : str or Path, optional
-            Path to the metadata stored in a JSON file.
-        folder : str or Path, optional
-            The working directory for the function. Will use the Shelley
-            object's working directory if node is given.
-        cleanup : bool, optional
-            Flag that indicates if the temporary transaction files should be
-            removed when finished (defaults to True).
-
-        Return
-        ------
-        str
-            Path to the mint transaction file generated.
-        """
-        return self.build_multi_mint_transaction(
-            [quantity],
-            policy_id,
-            [asset_name],
-            payment_addr,
-            witness_count,
-            tx_metadata=tx_metadata,
-            folder=folder,
-            cleanup=cleanup,
-        )
-
-    def build_multi_mint_transaction(
-        self,
-        quantities,
         policy_id,
         asset_names,
+        quantities,
         payment_addr,
         witness_count,
+        minting_script,
         tx_metadata=None,
+        ada=0.0,
         folder=None,
         cleanup=True,
     ) -> str:
@@ -464,19 +469,20 @@ class MaryTools:
 
         Parameters
         ----------
-        quantities : list
-            List of the numbers of each asset to mint.
         policy_id : str
-            The minting policy ID generated from the signature script--the
-            same for all assets.
+            The minting policy ID (generated from the signature script).
         asset_names : list
-            List of asset names (same size as quantity list).
+            A list of asset names.
+        quantities : list
+            A list of asset quantities.
         payment_addr : str
             The address paying the minting fees. Will also own the tokens.
         witness_count : int
             The number of signing keys.
         tx_metadata : str or Path, optional
             Path to the metadata stored in a JSON file.
+        ada : float, optional
+            Optionally set the amount of ADA to be included with the tokens.
         folder : str or Path, optional
             The working directory for the function. Will use the Shelley
             object's working directory if node is given.
@@ -489,6 +495,14 @@ class MaryTools:
         str
             Path to the mint transaction file generated.
         """
+
+        # This is a constant modifier to determine the minimum ADA for breaking
+        # off additional ADA into a separate UTxO. It essentially prevents
+        # oscillations at potential bifurcation points where adding or taking
+        # away a transaction output puts the extra ADA under or over the
+        # minimum UTxO due to transaction fees. This parameter may need to be
+        # tuned bust should be fairly small.
+        minMult = 2.1
 
         # Get a working directory to store the generated files and make sure
         # the directory exists.
@@ -501,9 +515,26 @@ class MaryTools:
             else:
                 self.shelley._ShelleyTools__run(f'mkdir -p "{folder}"')
 
-        # Get a list of UTXOs and sort them in decending order by value.
+        # Make sure all names are unique and the quantities match the names.
+        # Giving a name is optional. So, if no names, one quantitiy value is
+        # required.
+        asset_names = list(set(asset_names))
+        if len(asset_names) == 0:
+            if len(quantities) != 1:
+                raise MaryError("Invalid list of quantities.")
+        else:
+            if len(quantities) != len(asset_names):
+                raise MaryError("Invalid combination of names and quantities.")
+        for q in quantities:
+            if q < 1:
+                raise MaryError("Invalid quantity for minting!")
+
+        # Get a list of ADA only UTXOs and sort them in ascending order by
+        # value.
         utxos = self.shelley.get_utxos(payment_addr, filter="Lovelace")
         utxos.sort(key=lambda k: k["Lovelace"], reverse=True)
+        if len(utxos) < 1:
+            raise MaryError("No ADA only UTxOs for minting.")
 
         # Determine the TTL
         tip = self.shelley.get_tip()
@@ -514,43 +545,60 @@ class MaryTools:
         min_utxo = self.shelley.protocol_parameters["minUTxOValue"]
 
         # Calculate the minimum UTxO
-        min_output = self.calc_min_utxo({policy_id: asset_names})
+        mint_assets = [f"{policy_id}.{name}" for name in asset_names]
+        if len(mint_assets) == 0:
+            mint_assets = [policy_id]
+        min_love = self.calc_min_utxo(mint_assets)
+
+        # Lovelace to send with the Token
+        utxo_out = max([min_love, int(ada * 1_000_000)])
+        print(utxo_out)
 
         # Create minting string
-        for i, name in enumerate(asset_names):
-            if quantities[i] < 1:
-                raise MaryError("Invalid quantity for minting!")
-            if i == 0:
-                mint_str = f"{quantities[i]} {policy_id}.{name}"
-            else:
-                mint_str += f" + {quantities[i]} {policy_id}.{name}"
+        mint_str = ""
+        if len(asset_names) == 0:
+            mint_str += f"{quantities[0]} {policy_id}"
+        else:
+            for i, name in enumerate(asset_names):
+                sep = " + " if i != 0 else ""
+                mint_str += f"{sep}{quantities[i]} {policy_id}.{name}"
 
         # Create a metadata string
         meta_str = ""
         if tx_metadata is not None:
             meta_str = f"--metadata-json-file {tx_metadata}"
 
-        # Iterate through the UTXOs until we have enough funds to cover the
-        # transaction. Also, create the tx_in string for the transaction.
+        # Create a minting script string
+        script_str = f"--minting-script-file {minting_script}"
+
         tx_name = datetime.now().strftime("tx_%Y-%m-%d_%Hh%Mm%Ss")
         tx_draft_file = Path(self.shelley.working_dir) / (tx_name + ".draft")
+
+        # Iterate through the ADA only UTxOs until we have enough funds to
+        # cover the transaction. Also, create the tx_in string for the
+        # transaction.
+        utxo_ret_ada = 0
         utxo_total = 0
-        min_fee = 1  # make this start greater than utxo_total
         tx_in_str = ""
         for idx, utxo in enumerate(utxos):
+            # Add an availible UTxO to the list and then check to see if we now
+            # have enough lovelaces to cover the transaction fees and what we
+            # want with the tokens.
             utxo_count = idx + 1
             utxo_total += int(utxo["Lovelace"])
             tx_in_str += f"--tx-in {utxo['TxHash']}#{utxo['TxIx']} "
 
-            # Build a transaction draft
+            # Build a transaction draft with a single output.
             self.shelley.run_cli(
                 f"{self.shelley.cli} transaction build-raw {tx_in_str}"
                 f'--tx-out "{payment_addr}+{utxo_total}+{mint_str}" '
-                f'--ttl 0 --fee 0 --mint "{mint_str}" {meta_str} '
+                f"--ttl 0 --fee 0 "
+                f'--mint "{mint_str}" {script_str} {meta_str} '
                 f"{self.shelley.era} --out-file {tx_draft_file}"
             )
 
-            # Calculate the minimum fee
+            # Calculate the minimum fee for the transaction with a single
+            # minting output.
             min_fee = self.shelley.calc_min_fee(
                 tx_draft_file,
                 utxo_count,
@@ -558,22 +606,50 @@ class MaryTools:
                 witness_count=witness_count,
             )
 
-            # If we have enough Lovelaces to cover the transaction can stop
-            # iterating through the UTXOs.
-            if utxo_total > (min_fee + min_output):
-                break
+            # If we don't have enough ADA here, then go ahead and add another
+            # ADA only UTxO.
+            if utxo_total < (min_fee + utxo_out):
+                continue
+
+            # If we do have enough to cover the needed output and fees, check
+            # if we need to add a second UTxO with the extra ADA.
+            if utxo_total - (min_fee + utxo_out) > minMult * min_utxo:
+
+                # Create a draft transaction with an extra ADA only UTxO.
+                self.shelley.run_cli(
+                    f"{self.shelley.cli} transaction build-raw {tx_in_str}"
+                    f'--tx-out "{payment_addr}+{utxo_total}+{mint_str}" '
+                    f'--tx-out "{payment_addr}+0" --ttl 0 --fee 0 '
+                    f'--mint "{mint_str}" {script_str} {meta_str} '
+                    f"{self.shelley.era} --out-file {tx_draft_file}"
+                )
+
+                # Calculate the minimum fee for the transaction with an extra
+                # ADA only UTxO.
+                min_fee = self.shelley.calc_min_fee(
+                    tx_draft_file,
+                    utxo_count,
+                    tx_out_count=2,
+                    witness_count=witness_count,
+                )
+
+                # Save the amount of ADA that we are returning in a separate
+                # UTxO.
+                utxo_ret_ada = utxo_total - (min_fee + utxo_out)
+
+            else:
+                # If we are staying with the single UTxO result. Make sure any
+                # overages are just added to the output so the transaction
+                # balances.
+                utxo_out += utxo_total - (min_fee + utxo_out)
+                print(utxo_out)
+
+            # We should be good to go here.
+            break
 
         # Handle the error case where there is not enough inputs for the output
-        if utxo_total < min_fee:
-            if utxo_total == 0:
-                # This is the case where the sending wallet has no UTXOs to spend.
-                # The above for loop didn't run at all which is why the
-                # utxo_total is zero.
-                raise MaryError(
-                    f"Transaction failed due to insufficient funds. Account "
-                    f"{payment_addr} is empty."
-                )
-            cost_ada = min_fee / 1_000_000
+        if utxo_total < (min_fee + utxo_out):
+            cost_ada = (min_fee + utxo_out) / 1_000_000
             utxo_total_ada = utxo_total / 1_000_000
             raise MaryError(
                 f"Transaction failed due to insufficient funds. Account "
@@ -581,22 +657,17 @@ class MaryTools:
                 f"ADA because it only contains {utxo_total_ada} ADA."
             )
 
-        # Setup the new UTXO
-        utxo_amt = utxo_total - min_fee
-        if utxo_amt < min_output:
-            # Verify that the UTXO is larger than the minimum.
-            raise MaryError(
-                f"Transaction failed due to insufficient funds. The UTxO is "
-                f"{utxo_amt} lovelace which is smaller than the minimum UTxO "
-                f"of {min_output} lovelace."
-            )
-
-        # Build the transaction to the blockchain.
+        # Build the transaction to send to the blockchain.
+        token_return_ada_str = ""
+        if utxo_ret_ada > 0:
+            token_return_ada_str = f"--tx-out {payment_addr}+{utxo_ret_ada}"
         tx_raw_file = Path(self.shelley.working_dir) / (tx_name + ".raw")
+        print(utxo_out)
         self.shelley.run_cli(
             f"{self.shelley.cli} transaction build-raw {tx_in_str}"
-            f'--tx-out "{payment_addr}+{utxo_amt}+{mint_str}" '
-            f'--ttl {ttl} --fee {min_fee} --mint "{mint_str}" {meta_str} '
+            f'--tx-out "{payment_addr}+{utxo_out}+{mint_str}" '
+            f"{token_return_ada_str} --ttl {ttl} --fee {min_fee} "
+            f'--mint "{mint_str}" {script_str} {meta_str} '
             f"{self.shelley.era} --out-file {tx_raw_file}"
         )
 
@@ -609,9 +680,9 @@ class MaryTools:
 
     def build_multi_burn_transaction(
         self,
-        quantities,
         policy_id,
         asset_names,
+        quantities,
         payment_addr,
         witness_count,
         tx_metadata=None,
@@ -624,15 +695,15 @@ class MaryTools:
 
         Parameters
         ----------
-        quantities : list
-            List of the numbers of each asset to burn.
         policy_id : str
             The minting policy ID generated from the signature script--the
             same for all assets.
         asset_names : list
             List of asset names (same size as quantity list).
+        quantities : list
+            List of the numbers of each asset to burn.
         payment_addr : str
-            The address paying the minting fees. Will also own the tokens.
+            The address paying the minting fees. Will also contain the tokens.
         witness_count : int
             The number of signing keys.
         tx_metadata : str or Path, optional
@@ -661,50 +732,32 @@ class MaryTools:
             else:
                 self.shelley._ShelleyTools__run(f'mkdir -p "{folder}"')
 
+        # Make sure all names are unique and the quantities match the names.
+        # Giving a name is optional. So, if no names, one quantitiy value is
+        # required.
+        asset_names = list(set(asset_names))
+        if len(asset_names) == 0:
+            if len(quantities) != 1:
+                raise MaryError("Invalid list of quantities.")
+        else:
+            if len(quantities) != len(asset_names):
+                raise MaryError("Invalid combination of names and quantities.")
+
         # Users may send the quantities in as negative values since we are
         # burining. However, the quantities must be positive for the
         # calculations prior to the transaction. The negative sign will be
         # added to the mint inputs appropriately.
         quantities = [abs(q) for q in quantities]
 
-        # Get a list of UTxOs for the transaction
-        utxos = []
-        input_str = ""
-        input_lovelace = 0
-        remaining_quantities = []
-        for i, asset in enumerate(asset_names):
-
-            # Find all the UTxOs containing the asset to be burned. This may take a while if there are a lot of tokens!
-            filter_name = f"{policy_id}.{asset}"
-            utxos_found = self.shelley.get_utxos(
-                payment_addr, filter=filter_name
-            )
-
-            # Iterate through the UTxOs and only take enough needed to burn the
-            # requested amount of tokens. Also, only create a list of unique
-            # UTxOs.
-            asset_count = 0
-            for utxo in utxos_found:
-                if utxo not in utxos:
-                    utxos.append(utxo)
-
-                    # If this is a unique UTxO being added to the list, keep
-                    # track of the total Lovelaces and add it to the
-                    # transaction input string.
-                    input_lovelace += int(utxo["Lovelace"])
-                    input_str += f"--tx-in {utxo['TxHash']}#{utxo['TxIx']} "
-
-                asset_count += int(utxo[filter_name])
-                if asset_count >= quantities[i]:
-                    remaining_quantities.append(asset_count - quantities[i])
-                    break
-
-            if asset_count < quantities[i]:
-                raise MaryError("Not enought tokens availible to burn.")
-
-        # I don't think this can happen, but if it does something is wrong!
-        if len(remaining_quantities) != len(quantities):
-            raise MaryError("Something went wrong when finding UTxOs")
+        # Get the required UTxO(s) for the requested token.
+        (
+            input_str,
+            input_lovelace,
+            output_tokens,
+            return_tokens,
+        ) = self._get_token_utxos(
+            payment_addr, policy_id, asset_names, quantities
+        )
 
         # Determine the TTL
         tip = self.shelley.get_tip()
@@ -716,18 +769,13 @@ class MaryTools:
 
         # Create transaction strings for the tokens. The minting input string
         # and the UTxO string for any remaining tokens.
-        output_assets = {}
+        burn_str = ""
         token_utxo_str = ""
-        for i, asset_name in enumerate(asset_names):
-            if i == 0:
-                burn_str = f"{-1*quantities[i]} {policy_id}.{asset_name}"
-            else:
-                burn_str += f" + {-1*quantities[i]} {policy_id}.{asset_name}"
-            if remaining_quantities[i] > 0:
-                output_assets[policy_id] = asset_name
-                token_utxo_str += (
-                    f" + {remaining_quantities[i]} " f"{policy_id}.{asset_name}"
-                )
+        for i, asset in enumerate(output_tokens.keys()):
+            sep = " + " if i != 0 else " "
+            burn_str += f"{sep}{-1*output_tokens[asset]} {asset}"
+        for asset in return_tokens.keys():
+            token_utxo_str += f" + {return_tokens[asset]} {asset}"
 
         # Create a metadata string
         meta_str = ""
@@ -746,26 +794,25 @@ class MaryTools:
         )
         min_fee = self.shelley.calc_min_fee(
             tx_draft_file,
-            len(utxos),
+            utxo_count := input_str.count("--tx-in "),
             tx_out_count=1,
             witness_count=witness_count,
         )
-        min_utxo_ret = self.calc_min_utxo(output_assets)
+        min_utxo_ret = self.calc_min_utxo(return_tokens.keys())
 
         # If we don't have enough ADA, we will have to add another UTxO to cover
         # the transaction fees.
         if input_lovelace < min_fee + min_utxo_ret:
 
-            # Get a list of Lovelace only UTxOs and sort them in decending order
-            #  by value.
+            # Get a list of Lovelace only UTxOs and sort them in ascending order
+            # by value.
             ada_utxos = self.shelley.get_utxos(payment_addr, filter="Lovelace")
-            ada_utxos.sort(key=lambda k: k["Lovelace"], reverse=True)
+            ada_utxos.sort(key=lambda k: k["Lovelace"], reverse=False)
 
             # Iterate through the UTxOs until we have enough funds to cover the
             # transaction. Also, update the tx_in string for the transaction.
-            utxo_count = len(utxos)
-            for idx, utxo in enumerate(ada_utxos):
-                utxo_count += idx + 1
+            for utxo in ada_utxos:
+                utxo_count += 1
                 input_lovelace += int(utxo["Lovelace"])
                 input_str += f"--tx-in {utxo['TxHash']}#{utxo['TxIx']} "
 
@@ -780,7 +827,7 @@ class MaryTools:
                 # Calculate the minimum fee
                 min_fee = self.shelley.calc_min_fee(
                     tx_draft_file,
-                    len(utxos),
+                    utxo_count,
                     tx_out_count=1,
                     witness_count=witness_count,
                 )
