@@ -1189,7 +1189,7 @@ class ShelleyTools:
         # Return the path to the signed file for downstream use.
         return tx_signed_file
 
-    def sign_transaction(self, tx_file, skeys, script=None) -> str:
+    def sign_transaction(self, tx_file, skeys) -> str:
         """Sign a transaction file with a signing key.
 
         Parameters
@@ -1198,8 +1198,6 @@ class ShelleyTools:
             Path to the transaction file to be signed.
         skeys : list
             List of paths (str or Path) to the signing key files.
-        script : str, Path, optional
-            Path to the multi-signature script.
         
         Returns
         -------
@@ -1211,18 +1209,13 @@ class ShelleyTools:
         signing_key_args = ""
         for key_path in skeys:
             signing_key_args += f"--signing-key-file {key_path} "
-
-        # Multi-signature Script
-        script_str = ""
-        if script is not None:
-            script_str = f" --script-file {script} "
         
         # Sign the transaction with the signing key
         tx_name = Path(tx_file).stem
         tx_signed_file = tx_name + ".signed"
         result = self.run_cli(
             f"{self.cli} transaction sign "
-            f"--tx-body-file {tx_file} {signing_key_args} {script_str}"
+            f"--tx-body-file {tx_file} {signing_key_args} "
             f"{self.network} --out-file {tx_signed_file}"
         )
 
