@@ -176,17 +176,18 @@ class MaryTools:
         )
 
         # Get the number of unique policy IDs and token names in the bundle
-        num_assets = len(unique_pids)
-        num_pids = len(unique_names)
+        num_pids = len(unique_pids)
+        num_assets = max([len(unique_names), 1])
 
         # The sum of the length of the ByteStrings representing distinct asset names
         sum_asset_name_lengths = sum(
             [len(s.encode("utf-8")) for s in unique_names]
         )
+        [s.encode("utf-8") for s in unique_names]
 
         # The size of the token bundle in 8-byte long words
         size_bytes = 6 + round_up_bytes_to_words(
-            ((num_assets) * 12) + sum_asset_name_lengths + (num_pids * pid_size)
+            (num_assets * 12) + sum_asset_name_lengths + (num_pids * pid_size)
         )
 
         return max(
@@ -479,6 +480,8 @@ class MaryTools:
             The address paying the minting fees. Will also own the tokens.
         witness_count : int
             The number of signing keys.
+        minting_script:
+
         tx_metadata : str or Path, optional
             Path to the metadata stored in a JSON file.
         ada : float, optional
