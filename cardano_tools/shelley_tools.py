@@ -155,6 +155,21 @@ class ShelleyTools:
         self.protocol_parameters = json.loads(json_data)
         return params_file
 
+    def get_min_utxo(self) -> int:
+        """Get the minimum ADA only UTxO size."""
+        
+        # Ensure the parameters file exists
+        self.load_protocol_parameters()
+
+        # These are constants but may change in the future
+        coin_Size = 2
+        utxo_entry_size_without_val = 27
+        ada_only_utxo_size = utxo_entry_size_without_val + coin_Size
+
+        # Calculate the minimum UTxO from network parameters 
+        utxo_cost_word = self.protocol_parameters["utxoCostPerWord"]
+        return ada_only_utxo_size*utxo_cost_word
+
     def get_tip(self) -> int:
         """Query the node for the current tip of the blockchain.
         """
@@ -273,6 +288,8 @@ class ShelleyTools:
             # Extra tokens will be separated by a "+" sign.
             extra = [i for i, j in enumerate(vals) if j == "+"]
             for i in extra:
+                if 'TxOutDatum' in vals[i + 1]:
+                    continue
                 asset = vals[i + 2]
                 amt = vals[i + 1]
                 if asset in utxo_dict:
@@ -992,8 +1009,7 @@ class ShelleyTools:
         ttl = tip + self.ttl_buffer
 
         # Ensure the parameters file exists
-        self.load_protocol_parameters()
-        min_utxo = self.protocol_parameters["minUTxOValue"]
+        min_utxo = self.get_min_utxo()
 
         # Iterate through the UTXOs until we have enough funds to cover the
         # transaction. Also, create the tx_in string for the transaction.
@@ -1750,7 +1766,7 @@ class ShelleyTools:
         """
 
         # Get the network parameters
-        params_file = self.load_protocol_parameters()
+        self.load_protocol_parameters()
         e_max = self.protocol_parameters["eMax"]
 
         # Make sure the remaining epochs is a valid number.

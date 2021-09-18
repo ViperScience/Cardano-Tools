@@ -147,21 +147,22 @@ class MaryTools:
         # Ensure the parameters file exists
         self.shelley.load_protocol_parameters()
 
-        # Get the minimum UTxO parameter
-        min_utxo = self.shelley.protocol_parameters["minUTxOValue"]
-        if len(assets) == 0:
-            return min_utxo
-
         # Round the number of bytes to the minimum number of 8 byte words needed
         # to hold all the bytes.
         def round_up_bytes_to_words(b):
             return (b + 7) // 8
 
         # These are constants but may change in the future
-        coin_Size = 0
+        coin_Size = 2
         utxo_entry_size_without_val = 27
         ada_only_utxo_size = utxo_entry_size_without_val + coin_Size
         pid_size = 28
+
+        # Get the minimum UTxO parameter
+        utxo_cost_word = self.shelley.protocol_parameters["utxoCostPerWord"]
+        min_utxo = ada_only_utxo_size*utxo_cost_word
+        if len(assets) == 0:
+            return min_utxo
 
         # Get lists of unique policy IDs and asset names.
         unique_pids = list(set([asset.split(".")[0] for asset in assets]))
@@ -295,8 +296,7 @@ class MaryTools:
         ttl = tip + self.shelley.ttl_buffer
 
         # Ensure the parameters file exists
-        self.shelley.load_protocol_parameters()
-        min_utxo = self.shelley.protocol_parameters["minUTxOValue"]
+        min_utxo = self.shelley.get_min_utxo()
 
         # Create a metadata string
         meta_str = ""  # Maybe add later
@@ -543,11 +543,8 @@ class MaryTools:
         tip = self.shelley.get_tip()
         ttl = tip + self.shelley.ttl_buffer
 
-        # Ensure the parameters file exists
-        self.shelley.load_protocol_parameters()
-        min_utxo = self.shelley.protocol_parameters["minUTxOValue"]
-
         # Calculate the minimum UTxO
+        min_utxo = self.shelley.get_min_utxo()
         mint_assets = [f"{policy_id}.{name}" for name in asset_names]
         if len(mint_assets) == 0:
             mint_assets = [policy_id]
@@ -764,9 +761,8 @@ class MaryTools:
         tip = self.shelley.get_tip()
         ttl = tip + self.shelley.ttl_buffer
 
-        # Ensure the parameters file exists
-        self.shelley.load_protocol_parameters()
-        min_utxo = self.shelley.protocol_parameters["minUTxOValue"]
+        # Get the minimum ADA only UTxO size.
+        min_utxo = self.shelley.get_min_utxo()
 
         # Create transaction strings for the tokens. The minting input string
         # and the UTxO string for any remaining tokens.
