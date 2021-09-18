@@ -555,7 +555,6 @@ class MaryTools:
 
         # Lovelace to send with the Token
         utxo_out = max([min_love, int(ada * 1_000_000)])
-        print(utxo_out)
 
         # Create minting string
         mint_str = ""
@@ -645,7 +644,6 @@ class MaryTools:
                 # overages are just added to the output so the transaction
                 # balances.
                 utxo_out += utxo_total - (min_fee + utxo_out)
-                print(utxo_out)
 
             # We should be good to go here.
             break
@@ -665,7 +663,6 @@ class MaryTools:
         if utxo_ret_ada > 0:
             token_return_ada_str = f"--tx-out {payment_addr}+{utxo_ret_ada}"
         tx_raw_file = Path(self.shelley.working_dir) / (tx_name + ".raw")
-        print(utxo_out)
         self.shelley.run_cli(
             f"{self.shelley.cli} transaction build-raw {tx_in_str}"
             f'--tx-out "{payment_addr}+{utxo_out}+{mint_str}" '
@@ -681,13 +678,14 @@ class MaryTools:
         # Return the path to the raw transaction file.
         return tx_raw_file
 
-    def build_multi_burn_transaction(
+    def build_burn_transaction(
         self,
         policy_id,
         asset_names,
         quantities,
         payment_addr,
         witness_count,
+        minting_script,
         tx_metadata=None,
         folder=None,
         cleanup=True,
@@ -775,7 +773,7 @@ class MaryTools:
         burn_str = ""
         token_utxo_str = ""
         for i, asset in enumerate(output_tokens.keys()):
-            sep = " + " if i != 0 else " "
+            sep = " + " if i != 0 else ""
             burn_str += f"{sep}{-1*output_tokens[asset]} {asset}"
         for asset in return_tokens.keys():
             token_utxo_str += f" + {return_tokens[asset]} {asset}"
@@ -784,6 +782,9 @@ class MaryTools:
         meta_str = ""
         if tx_metadata is not None:
             meta_str = f"--metadata-json-file {tx_metadata}"
+        
+        # Create a minting script string
+        script_str = f"--minting-script-file {minting_script}"
 
         # Calculate the minimum fee and UTxO sizes for the transaction as it is
         # right now with only the minimum UTxOs needed for the tokens.
@@ -792,7 +793,7 @@ class MaryTools:
         self.shelley.run_cli(
             f"{self.shelley.cli} transaction build-raw {input_str}"
             f'--tx-out "{payment_addr}+{input_lovelace}{token_utxo_str}" '
-            f'--ttl 0 --fee 0 --mint "{burn_str}" {meta_str} '
+            f'--ttl 0 --fee 0 --mint "{burn_str}" {script_str} {meta_str} '
             f"{self.shelley.era} --out-file {tx_draft_file}"
         )
         min_fee = self.shelley.calc_min_fee(
@@ -823,7 +824,7 @@ class MaryTools:
                 self.shelley.run_cli(
                     f"{self.shelley.cli} transaction build-raw {input_str}"
                     f'--tx-out "{payment_addr}+{input_lovelace}{token_utxo_str}" '
-                    f'--ttl 0 --fee 0 --mint "{burn_str}" {meta_str} '
+                    f'--ttl 0 --fee 0 --mint "{burn_str}" {script_str} {meta_str} '
                     f"{self.shelley.era} --out-file {tx_draft_file}"
                 )
 
@@ -856,7 +857,7 @@ class MaryTools:
         self.shelley.run_cli(
             f"{self.shelley.cli} transaction build-raw {input_str}"
             f'--tx-out "{payment_addr}+{utxo_amt}{token_utxo_str}" '
-            f'--ttl {ttl} --fee {min_fee} --mint "{burn_str}" {meta_str} '
+            f'--ttl {ttl} --fee {min_fee} --mint "{burn_str}" {script_str} {meta_str} '
             f"{self.shelley.era} --out-file {tx_raw_file}"
         )
 
