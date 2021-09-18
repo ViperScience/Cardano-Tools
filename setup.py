@@ -10,7 +10,7 @@ README = (HERE / "README.md").read_text()
 # This call to setup() does all the work
 setup(
     name="cardano-tools",
-    version="0.4.0",
+    version="1.0.0",
     description="Interfaces with the Cardano full-node software.",
     long_description=README,
     long_description_content_type="text/markdown",
