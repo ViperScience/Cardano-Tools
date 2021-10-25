@@ -39,7 +39,7 @@ class ShelleyTools:
         # Set the path to the CLI and verify it works. An exception will be
         # thrown if the command is not found.
         self.cli = path_to_cli
-        self.run_cli(f"{self.cli} --version")
+        self.check_node_version()
 
         # Set the working directory and make sure it exists.
         self.working_dir = Path(working_dir)
@@ -52,6 +52,11 @@ class ShelleyTools:
         self.network = network
         self.era = era
         self.protocol_parameters = None
+    
+    def check_node_version(self):
+        res = self.run_cli(f"{self.cli} --version")
+        if (res.stdout.split(" ")[1] != "1.27.1"):
+            print("WARNING: Incompatible cardano-node version.")
 
     def run_cli(self, cmd):
         if self.ssh is not None:
