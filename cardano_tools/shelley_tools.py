@@ -1168,7 +1168,7 @@ class ShelleyTools:
         if start_slot is not None:
             script["scripts"].append({"slot": start_slot, "type": "after"})
         if end_slot is not None:
-            script["scripts"].append({"slot": start_slot, "type": "before"})
+            script["scripts"].append({"slot": end_slot, "type": "before"})
 
         # Write the script file
         file_path = Path(folder) / (script_name + ".json")
