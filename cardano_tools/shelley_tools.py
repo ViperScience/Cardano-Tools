@@ -467,7 +467,7 @@ class ShelleyTools:
         if len(utxos) < 1:
             raise ShelleyError(
                 f"Transaction failed due to insufficient funds. "
-                f"Account {addr} cannot pay tranction costs because "
+                f"Account {addr} cannot pay transaction costs because "
                 "it does not contain any ADA."
             )
         utxos.sort(key=lambda k: k["Lovelace"], reverse=True)
@@ -508,7 +508,7 @@ class ShelleyTools:
             utxo_total_ada = utxo_total / 1_000_000
             raise ShelleyError(
                 f"Transaction failed due to insufficient funds. "
-                f"Account {addr} cannot pay tranction costs of {cost_ada} "
+                f"Account {addr} cannot pay transaction costs of {cost_ada} "
                 f"ADA because it only contains {utxo_total_ada} ADA."
             )
 
@@ -1065,7 +1065,7 @@ class ShelleyTools:
                 )    
             raise ShelleyError(
                 f"Transaction failed due to insufficient funds. Account "
-                f"{payment_addr} cannot pay tranction costs of {cost_ada} "
+                f"{payment_addr} cannot pay transaction costs of {cost_ada} "
                 f"ADA because it only contains {utxo_total_ada} ADA."
             )
 
@@ -1078,7 +1078,7 @@ class ShelleyTools:
             # Verify that the UTXO is larger than the minimum.
             raise ShelleyError(
                 f"Transaction failed due to insufficient funds. Account "
-                f"{payment_addr} cannot pay tranction costs of {cost_ada} "
+                f"{payment_addr} cannot pay transaction costs of {cost_ada} "
                 f"ADA because it only contains {utxo_total_ada} ADA "
                 f"resulting in an UTxO of {utxo_total_ada - cost_ada} ADA "
                 f"which is less than the minimum of {min_utxo / 1_000_000}."
@@ -1442,7 +1442,7 @@ class ShelleyTools:
             utxo_total_ada = utxo_total / 1_000_000
             raise ShelleyError(
                 f"Transaction failed due to insufficient funds. Account "
-                f"{payment_addr} cannot pay tranction costs of {cost_ada} "
+                f"{payment_addr} cannot pay transaction costs of {cost_ada} "
                 f"lovelaces because it only contains {utxo_total_ada} ADA."
             )
 
@@ -1696,7 +1696,7 @@ class ShelleyTools:
             utxo_total_ada = utxo_total / 1_000_000
             raise ShelleyError(
                 f"Transaction failed due to insufficient funds. Account "
-                f"{payment_addr} cannot pay tranction costs of {cost_ada} "
+                f"{payment_addr} cannot pay transaction costs of {cost_ada} "
                 f"lovelaces because it only contains {utxo_total_ada} ADA."
             )
 
@@ -1837,7 +1837,7 @@ class ShelleyTools:
             utxo_total_ada = utxo_total / 1_000_000
             raise ShelleyError(
                 f"Transaction failed due to insufficient funds. Account "
-                f"{payment_addr} cannot pay tranction costs of {min_fee} "
+                f"{payment_addr} cannot pay transaction costs of {min_fee} "
                 f"lovelaces because it only contains {utxo_total_ada} ADA."
             )
 
@@ -1942,7 +1942,7 @@ class ShelleyTools:
         if len(utxos) < 1:
             raise ShelleyError(
                 f"Transaction failed due to insufficient funds. "
-                f"Account {payment_addr} cannot pay tranction costs because "
+                f"Account {payment_addr} cannot pay transaction costs because "
                 "it does not contain any ADA."
             )
         utxos.sort(key=lambda k: k["Lovelace"], reverse=True)
@@ -2006,7 +2006,7 @@ class ShelleyTools:
             a = receive_addr if payment_addr == receive_addr else payment_addr
             raise ShelleyError(
                 f"Transaction failed due to insufficient funds. "
-                f"Account {a} cannot pay tranction costs of {cost_ada} "
+                f"Account {a} cannot pay transaction costs of {cost_ada} "
                 f"ADA because it only contains {utxo_total_ada} ADA."
             )
 
@@ -2237,6 +2237,56 @@ class ShelleyTools:
             self.submit_transaction(tx_signed_file, cleanup)
         else:
             print(f"Signed transaction file saved to: {tx_signed_file}")
+
+    def days2slots(self, days, genesis_file) -> int:
+        """Convert time in days to time in slots.
+
+        Parameters
+        ----------
+        days : float
+            The number of days to convert to the number of slots. 
+        genesis_file : str or Path
+            Path to the Shelley genesis file.
+        
+        Returns
+        -------
+        int
+            Nearest integer value of slots occuring in the specified duration.
+        """
+
+        # Convert days to seconds.
+        dur_secs = days*24*60*60
+
+        # Get the info from the network genesis parameters.
+        json_data = self._load_text_file(genesis_file)
+        slot_dur_secs = json.loads(json_data)["slotLength"]
+
+        return int(dur_secs/slot_dur_secs)
+
+    def days2epochs(self, days, genesis_file) -> float:
+        """Convert time in days to time in epochs.
+
+        Parameters
+        ----------
+        days : float
+            The number of days to convert to the number of epochs. 
+        genesis_file : str or Path
+            Path to the Shelley genesis file.
+        
+        Returns
+        -------
+        float
+            Number of epochs occuring in the specified duration.
+        """
+
+        # Convert the days to the number of slots
+        dur_slots = self.days2slots(days, genesis_file)
+
+        # Get the info from the network genesis parameters.
+        json_data = self._load_text_file(genesis_file)
+        epoch_dur_slots = json.loads(json_data)["epochLength"]
+
+        return float(dur_slots)/epoch_dur_slots
 
 
 if __name__ == "__main__":
