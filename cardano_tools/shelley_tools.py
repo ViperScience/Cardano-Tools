@@ -175,14 +175,31 @@ class ShelleyTools:
         utxo_cost_word = self.protocol_parameters["utxoCostPerWord"]
         return ada_only_utxo_size*utxo_cost_word
 
-    def get_tip(self) -> int:
+    def cli_tip_query(self):
         """Query the node for the current tip of the blockchain.
+        Returns all the info from the query.
         """
         cmd = f"{self.cli} query tip {self.network}"
         result = self.run_cli(cmd)
         if "slot" not in result.stdout:
             raise ShelleyError(result.stderr)
         vals = json.loads(result.stdout)
+        return vals
+    
+    def get_epoch(self) -> int:
+        """Query the node for the current epoch.
+        """
+        vals = self.cli_tip_query()
+        if float(vals["syncProgress"]) != 100.0:
+            print("Warning: Node not fully synced!") # replace with logger
+        return vals["epoch"]
+    
+    def get_tip(self) -> int:
+        """Query the node for the current tip of the blockchain.
+        """
+        vals = self.cli_tip_query()
+        if float(vals["syncProgress"]) != 100.0:
+            print("Warning: Node not fully synced!") # replace with logger
         return vals["slot"]
 
     def make_address(self, name, folder=None) -> str:
