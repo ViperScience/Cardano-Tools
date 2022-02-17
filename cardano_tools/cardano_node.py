@@ -5,13 +5,24 @@ class CardanoNodeError(Exception):
     pass
 
 
-class CardanoNode():
+class CardanoNode:
+    """Provides an interface for starting up and shutting down a Cardano node."""
 
-    def __init__(self, binary, topology, database_path, socket_path, port,
-                 config, host_addr=None, kes_key=None, vrf_key=None, cert=None,
-                 ssh=None):
-        """Provides an interface for starting up a node locally or remote.
-        """
+    def __init__(
+        self,
+        binary,
+        topology,
+        database_path,
+        socket_path,
+        config,
+        port=3001,
+        host_addr=None,
+        kes_key=None,
+        vrf_key=None,
+        cert=None,
+        show_output=False,
+    ):
+        self.logger = logging.getLogger(__name__)
         self.binary = binary
         self.topology = topology
         self.db_path = database_path
@@ -22,19 +33,17 @@ class CardanoNode():
         self.kes_key = kes_key
         self.vrf_key = vrf_key
         self.cert = cert
-        self.ssh = ssh
-        self.debug = False
+        self.process = None
+        self.show_output = show_output
 
     def __exec(self, args):
-        cmd = f"nohup {args} &> /dev/null &"
-        if self.debug:
-            print(cmd)
-        if self.ssh is not None:
-            self.ssh.open()
-            self.ssh.run(cmd, warn=True, hide=True)
-            self.ssh.close()
+        self.logger.debug(f'CMD: "{args}"')
+        if self.show_output:
+            self.process = subprocess.Popen(args.split())
         else:
-            subprocess.run(cmd.split())
+            self.process = subprocess.Popen(
+                args.split(), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+            )
 
     def start(self, mode="relay"):
         """Start the cardano-node (default relay mode)."""
@@ -55,3 +64,7 @@ class CardanoNode():
                 f"--shelley-operational-certificate {self.cert}"
             )
         self.__exec(cmd)
+
+    def stop(self):
+        """Stop the cardano-node (send SIGINT)."""
+        self.process.send_signal(signal.SIGINT)
