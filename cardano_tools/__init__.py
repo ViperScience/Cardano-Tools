@@ -1,6 +1,8 @@
-from .shelley_tools import ShelleyTools
-from .mary_tools import MaryTools
 from .cardano_node import CardanoNode
-from .wallet_tools import WalletToolsCLI, WalletToolsHTTP
+from .wallet_tools import WalletCLI, WalletHTTP
+from .cli_tools import NodeCLI
+from . import utils
 
-__version__ = "1.0.0"
+__version__ = "2.0.0"
+
+__all__ = ["CLITools", "WalletCLI", "WalletHTTP", "utils"]

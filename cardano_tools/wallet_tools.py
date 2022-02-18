@@ -8,14 +8,14 @@ import json
 import time
 
 # Cardano-Tools components
-from .mary_tools import minimum_utxo
+from .utils import minimum_utxo
 
 
 class WalletError(Exception):
     pass
 
 
-class WalletToolsCLI:
+class WalletCLI:
     def __init__(
         self,
         path_to_cli,
@@ -124,7 +124,7 @@ class WalletToolsCLI:
         return bal / 1_000_000  # Return the value in units of ADA
 
 
-class WalletToolsHTTP:
+class WalletHTTP:
     def __init__(self, wallet_server, wallet_server_port):
         self.wallet_url = f"{wallet_server}:{wallet_server_port}/"
         self.logger = logging.getLogger(__name__)
@@ -243,7 +243,7 @@ class WalletToolsHTTP:
         self.logger.debug(r.text)
         return payload
 
-    def confirm_tx(self, wallet_id: str, tx_id: str, timeout: float = 360):
+    def confirm_tx(self, wallet_id: str, tx_id: str, timeout: float = 600, pause: float = 5):
         """Checks the given transaction and waits until it's submitted."""
         start_time = time.time()
         while True:
@@ -260,7 +260,7 @@ class WalletToolsHTTP:
             self.logger.info(
                 "Transaction not yet confirmed, pausing before next check..."
             )
-            time.sleep(2)
+            time.sleep(pause)
 
     def send_lovelace(
         self,
