@@ -1,36 +1,42 @@
 from collections import namedtuple
+from ctypes import Union
 from datetime import datetime
 from pathlib import Path
+from typing import Tuple
 import subprocess
 import requests
+import logging
 import shlex
 import json
 import sys
 import os
 
 
-class ShelleyError(Exception):
+# Cardano-Tools components
+from . import utils
+
+
+LATEST_SUPPORTED_NODE_VERSION = "1.32.1"
+
+
+class NodeCLIError(Exception):
     pass
 
 
-class ShelleyTools:
+class NodeCLI:
     def __init__(
         self,
         path_to_cli,
         path_to_socket,
         working_dir,
         ttl_buffer=1000,
-        ssh=None,
         network="--mainnet",
         era="--mary-era",
     ):
+        self.logger = logging.getLogger(__name__)
 
         # Debug flag -- may be set after object initialization.
         self.debug = False
-
-        # If the host is remote a Connection object (fabric) is supplied.
-        # Set this first because its used during setup.
-        self.ssh = ssh
 
         # Set the socket path, it must be set as an environment variable.
         # Set this first because its used during setup.
@@ -43,109 +49,46 @@ class ShelleyTools:
 
         # Set the working directory and make sure it exists.
         self.working_dir = Path(working_dir)
-        if self.ssh is None:
-            self.working_dir.mkdir(parents=True, exist_ok=True)
-        else:
-            self.run_cli(f'mkdir -p "{self.working_dir}"')
+        self.working_dir.mkdir(parents=True, exist_ok=True)
 
         self.ttl_buffer = ttl_buffer
         self.network = network
         self.era = era
         self.protocol_parameters = None
-    
+
+        self.logger = logging.getLogger(__name__)
+
     def check_node_version(self):
         res = self.run_cli(f"{self.cli} --version")
-        if (res.stdout.split(" ")[1] != "1.27.1"):
-            print("WARNING: Incompatible cardano-node version.")
+        if (res.stdout.split(" ")[1] != LATEST_SUPPORTED_NODE_VERSION):
+            self.logger.warn(f'Unsuported cardano-node version.')
 
     def run_cli(self, cmd):
-        if self.ssh is not None:
-
-            self.ssh.open()  # Open the connection
-
-            # Run the commands remotely
-            cmd = f"export CARDANO_NODE_SOCKET_PATH={self.socket}; " + cmd
-            if self.debug:
-                print(f'CMD: "{cmd}"')
-                result = self.ssh.run(cmd, warn=True)
-                print(f'stdout: "{result.stdout}"')
-                print(f'stderr: "{result.stderr}"')
-            else:
-                result = self.ssh.run(cmd, warn=True, hide=True)
-            stdout = result.stdout.strip()
-            stderr = result.stderr.strip()
-
-            self.ssh.close()  # Close the connection
-
-        else:
-
-            # Execute the commands locally
-            os.environ["CARDANO_NODE_SOCKET_PATH"] = self.socket
-            result = subprocess.run(shlex.split(cmd), capture_output=True)
-            stdout = result.stdout.decode().strip()
-            stderr = result.stderr.decode().strip()
-            if self.debug:
-                print(f'CMD: "{cmd}"')
-                print(f'stdout: "{stdout}"')
-                print(f'stderr: "{stderr}"')
-
+        os.environ["CARDANO_NODE_SOCKET_PATH"] = self.socket
+        result = subprocess.run(shlex.split(cmd), capture_output=True)
+        stdout = result.stdout.decode().strip()
+        stderr = result.stderr.decode().strip()
+        self.logger.debug(f'CMD: "{cmd}"')
+        self.logger.debug(f'stdout: "{stdout}"')
+        self.logger.debug(f'stderr: "{stderr}"')
         ResultType = namedtuple("Result", "stdout, stderr")
         return ResultType(stdout, stderr)
 
     def _load_text_file(self, fpath):
-        if self.ssh is not None:
-            # Open the connection
-            self.ssh.open()
-
-            # Run the commands remotely
-            result = self.ssh.run(f"cat {fpath}", warn=True, hide=True)
-            text = result.stdout
-
-            # Close the connection
-            self.ssh.close()
-
-        else:
-            text = open(fpath, "r").read()
-
+        text = open(fpath, "r").read()
         return text
 
     def _dump_text_file(self, fpath, datastr):
-        if self.ssh is not None:
-
-            # Run the commands remotely
-            self.ssh.open()  # Open the connection
-            cmd = f'printf "%s" \'{datastr}\' > "{fpath}"'
-            self.ssh.run(cmd, warn=True, hide=True)
-            self.ssh.close()  # Close the connection
-
-        else:
-            with open(fpath, "w") as outfile:
-                outfile.write(datastr)
+        with open(fpath, "w") as outfile:
+            outfile.write(datastr)
 
     def _download_file(self, url, fpath):
-        if self.ssh is not None:
-
-            # Run the commands remotely
-            self.ssh.open()  # Open the connection
-            cmd = f"curl -sSL {url} -o {fpath}"
-            self.ssh.run(cmd, warn=True, hide=True)
-            self.ssh.close()  # Close the connection
-
-        else:
-            download = requests.get(url)
-            with open(fpath, "wb") as download_file:
-                download_file.write(download.content)
+        download = requests.get(url)
+        with open(fpath, "wb") as download_file:
+            download_file.write(download.content)
 
     def _cleanup_file(self, fpath):
-        if self.ssh is not None:
-
-            # Run the commands remotely
-            self.ssh.open()  # Open the connection
-            self.ssh.run(f"rm {fpath}", warn=True, hide=True)
-            self.ssh.close()  # Close the connection
-
-        else:
-            os.remove(fpath)
+        os.remove(fpath)
 
     def load_protocol_parameters(self):
         """Load the protocol parameters which are needed for creating
@@ -182,7 +125,7 @@ class ShelleyTools:
         cmd = f"{self.cli} query tip {self.network}"
         result = self.run_cli(cmd)
         if "slot" not in result.stdout:
-            raise ShelleyError(result.stderr)
+            raise NodeCLIError(result.stderr)
         vals = json.loads(result.stdout)
         return vals
     
@@ -191,7 +134,7 @@ class ShelleyTools:
         """
         vals = self.cli_tip_query()
         if float(vals["syncProgress"]) != 100.0:
-            print("Warning: Node not fully synced!") # replace with logger
+            self.logger.warn("Node not fully synced!")
         return vals["epoch"]
     
     def get_tip(self) -> int:
@@ -199,7 +142,7 @@ class ShelleyTools:
         """
         vals = self.cli_tip_query()
         if float(vals["syncProgress"]) != 100.0:
-            print("Warning: Node not fully synced!") # replace with logger
+            self.logger.warn("Node not fully synced!")
         return vals["slot"]
 
     def make_address(self, name, folder=None) -> str:
@@ -207,12 +150,10 @@ class ShelleyTools:
         """
         if folder is None:
             folder = self.working_dir
-
-        folder = Path(folder)
-        if self.ssh is None:
-            folder.mkdir(parents=True, exist_ok=True)
         else:
-            self.run_cli(f'mkdir -p "{folder}"')
+            folder = Path(folder)
+            folder.mkdir(parents=True, exist_ok=True)
+
         payment_vkey = folder / (name + ".vkey")
         payment_skey = folder / (name + ".skey")
         stake_vkey = folder / (name + "_stake.vkey")
@@ -431,7 +372,7 @@ class ShelleyTools:
         if not offline:
             self.submit_transaction(tx_signed_file, cleanup)
         else:
-            print(f"Signed transaction file saved to: {tx_signed_file}")
+            self.logger.info(f"Signed transaction file saved to: {tx_signed_file}")
 
     def register_stake_address(
         self,
@@ -482,7 +423,7 @@ class ShelleyTools:
         # Get a list of UTXOs and sort them in decending order by value.
         utxos = self.get_utxos(addr)
         if len(utxos) < 1:
-            raise ShelleyError(
+            raise NodeCLIError(
                 f"Transaction failed due to insufficient funds. "
                 f"Account {addr} cannot pay transaction costs because "
                 "it does not contain any ADA."
@@ -523,7 +464,7 @@ class ShelleyTools:
         if utxo_total < cost:
             cost_ada = cost / 1_000_000
             utxo_total_ada = utxo_total / 1_000_000
-            raise ShelleyError(
+            raise NodeCLIError(
                 f"Transaction failed due to insufficient funds. "
                 f"Account {addr} cannot pay transaction costs of {cost_ada} "
                 f"ADA because it only contains {utxo_total_ada} ADA."
@@ -557,9 +498,9 @@ class ShelleyTools:
         if not offline:
             self.submit_transaction(tx_signed_file, cleanup)
         else:
-            print(f"Signed transaction file saved to: {tx_signed_file}")
+            self.logger.info(f"Signed transaction file saved to: {tx_signed_file}")
 
-    def generate_kes_keys(self, pool_name="pool", folder=None) -> (str, str):
+    def generate_kes_keys(self, pool_name="pool", folder=None) -> Tuple[str, str]:
         """Generate a new set of KES keys for a stake pool.
 
         KES == Key Evolving Signature
@@ -583,10 +524,7 @@ class ShelleyTools:
             folder = self.working_dir
         else:
             folder = Path(folder)
-            if self.ssh is None:
-                folder.mkdir(parents=True, exist_ok=True)
-            else:
-                self.run_cli(f'mkdir -p "{folder}"')
+            folder.mkdir(parents=True, exist_ok=True)
 
         # Generate the KES Key pair
         kes_vkey = folder / (pool_name + "_kes.vkey")
@@ -630,10 +568,7 @@ class ShelleyTools:
             folder = self.working_dir
         else:
             folder = Path(folder)
-            if self.ssh is None:
-                folder.mkdir(parents=True, exist_ok=True)
-            else:
-                self.run_cli(f'mkdir -p "{folder}"')
+            folder.mkdir(parents=True, exist_ok=True)
 
         # Generate Cold Keys and a Cold_counter
         cold_vkey = folder / (pool_name + "_cold.vkey")
@@ -715,10 +650,7 @@ class ShelleyTools:
             folder = self.working_dir
         else:
             folder = Path(folder)
-            if self.ssh is None:
-                folder.mkdir(parents=True, exist_ok=True)
-            else:
-                self.run_cli(f'mkdir -p "{folder}"')
+            folder.mkdir(parents=True, exist_ok=True)
 
         # Generate the new KES key pair
         kes_vkey, kes_skey = self.generate_kes_keys(pool_name, folder)
@@ -742,7 +674,7 @@ class ShelleyTools:
         )
 
         if result.stderr:
-            raise ShelleyError(f"Unable to rotate KES keys: {result.stderr}")
+            raise NodeCLIError(f"Unable to rotate KES keys: {result.stderr}")
 
 
     def create_metadata_file(self, pool_metadata, folder=None) -> str:
@@ -755,10 +687,7 @@ class ShelleyTools:
             folder = self.working_dir
         else:
             folder = Path(folder)
-            if self.ssh is None:
-                folder.mkdir(parents=True, exist_ok=True)
-            else:
-                self.run_cli(f'mkdir -p "{folder}"')
+            folder.mkdir(parents=True, exist_ok=True)
 
         # Create a JSON file with the pool metadata and return the file hash.
         ticker = pool_metadata["ticker"]
@@ -841,10 +770,7 @@ class ShelleyTools:
             folder = self.working_dir
         else:
             folder = Path(folder)
-            if self.ssh is None:
-                folder.mkdir(parents=True, exist_ok=True)
-            else:
-                self.run_cli(f'mkdir -p "{folder}"')
+            folder.mkdir(parents=True, exist_ok=True)
 
         # Get the hash of the JSON file if the URL is provided and the hash is
         # not specified.
@@ -894,7 +820,7 @@ class ShelleyTools:
         # Generate Stake pool registration certificate
         ts = datetime.now().strftime("tx_%Y-%m-%d_%Hh%Mm%Ss")
         pool_cert_path = folder / (pool_name + "_registration_" + ts + ".cert")
-        self.run_cli(
+        result = self.run_cli(
             f"{self.cli} stake-pool registration-certificate "
             f"--cold-verification-key-file {pool_cold_vkey} "
             f"--vrf-verification-key-file {pool_vrf_key} "
@@ -905,6 +831,8 @@ class ShelleyTools:
             f"{owner_vkey_args} {relay_args} {metadata_args} "
             f"{self.network} --out-file {pool_cert_path}"
         )
+        if result.stderr:
+            raise NodeCLIError(f"Unable to create certificate: {result.stderr}")
 
         # Return the path to the generated pool cert
         return pool_cert_path
@@ -931,10 +859,7 @@ class ShelleyTools:
             folder = self.working_dir
         else:
             folder = Path(folder)
-            if self.ssh is None:
-                folder.mkdir(parents=True, exist_ok=True)
-            else:
-                self.run_cli(f'mkdir -p "{folder}"')
+            folder.mkdir(parents=True, exist_ok=True)
 
         # Generate delegation certificate (pledge from each owner)
         ts = datetime.now().strftime("tx_%Y-%m-%d_%Hh%Mm%Ss")
@@ -998,10 +923,7 @@ class ShelleyTools:
             folder = self.working_dir
         else:
             folder = Path(folder)
-            if self.ssh is None:
-                folder.mkdir(parents=True, exist_ok=True)
-            else:
-                self.run_cli(f'mkdir -p "{folder}"')
+            folder.mkdir(parents=True, exist_ok=True)
 
         # Get a list of certificate arguments
         cert_args = ""
@@ -1076,11 +998,11 @@ class ShelleyTools:
             # The above for loop didn't run at all which is why the
             # lovelaces_out value is still sys.maxsize.
             if lovelaces_out == sys.maxsize:
-                raise ShelleyError(
+                raise NodeCLIError(
                     f"Transaction failed due to insufficient funds. Account "
                     f"{payment_addr} is empty."
                 )    
-            raise ShelleyError(
+            raise NodeCLIError(
                 f"Transaction failed due to insufficient funds. Account "
                 f"{payment_addr} cannot pay transaction costs of {cost_ada} "
                 f"ADA because it only contains {utxo_total_ada} ADA."
@@ -1093,7 +1015,7 @@ class ShelleyTools:
             pass
         elif utxo_amt < min_utxo:
             # Verify that the UTXO is larger than the minimum.
-            raise ShelleyError(
+            raise NodeCLIError(
                 f"Transaction failed due to insufficient funds. Account "
                 f"{payment_addr} cannot pay transaction costs of {cost_ada} "
                 f"ADA because it only contains {utxo_total_ada} ADA "
@@ -1159,10 +1081,7 @@ class ShelleyTools:
             folder = self.working_dir
         else:
             folder = Path(folder)
-            if self.ssh is None:
-                folder.mkdir(parents=True, exist_ok=True)
-            else:
-                self.run_cli(f'mkdir -p "{folder}"')
+            folder.mkdir(parents=True, exist_ok=True)
 
         # Build the list of signature hashes
         script = {
@@ -1177,7 +1096,7 @@ class ShelleyTools:
             script["type"] = "atLeast"
             script["required"] = int(required)
             if script["required"] < 1 or script["required"] >= len(key_hashes):
-                raise ShelleyError("Invalid number of required signatures.")
+                raise NodeCLIError("Invalid number of required signatures.")
         else:
             script["type"] = "all"
 
@@ -1258,12 +1177,12 @@ class ShelleyTools:
         )
 
         if result.stderr:
-            raise ShelleyError(f"Unable to sign transaction: {result.stderr}")
+            raise NodeCLIError(f"Unable to sign transaction: {result.stderr}")
 
         # Return the path to the signed file for downstream use.
         return tx_signed_file
 
-    def submit_transaction(self, signed_tx_file, cleanup=False):
+    def submit_transaction(self, signed_tx_file, cleanup=False) -> str:
         """Submit a transaction to the blockchain. This function is separate to
         enable the submissions of transactions signed by offline keys.
         
@@ -1274,6 +1193,11 @@ class ShelleyTools:
         cleanup : bool, optional
             Flag that indicates if the temporary transaction files should be
             removed when finished (defaults to false).
+        
+        Returns
+        -------
+        str
+            The transaction ID.
         """
 
         # Submit the transaction
@@ -1283,11 +1207,19 @@ class ShelleyTools:
         )
 
         if result.stderr:
-            raise ShelleyError(f"Unable to submit transaction: {result.stderr}")
+            raise NodeCLIError(f"Unable to submit transaction: {result.stderr}")
+
+        # Get the transaction ID
+        result = self.run_cli(
+            f"{self.cli} transaction txid --tx-file {signed_tx_file}"
+        )
+        txid = result.stdout.strip()
 
         # Delete the transaction files if specified.
         if cleanup:
             self._cleanup_file(signed_tx_file)
+
+        return txid
 
     def register_stake_pool(
         self,
@@ -1377,10 +1309,7 @@ class ShelleyTools:
             folder = self.working_dir
         else:
             folder = Path(folder)
-            if self.ssh is None:
-                folder.mkdir(parents=True, exist_ok=True)
-            else:
-                self.run_cli(f'mkdir -p "{folder}"')
+            folder.mkdir(parents=True, exist_ok=True)
 
         pool_cert_path = self.generate_stake_pool_cert(
             pool_name,
@@ -1457,7 +1386,7 @@ class ShelleyTools:
         if utxo_total < (min_fee + pool_deposit):
             cost_ada = (min_fee + pool_deposit) / 1_000_000
             utxo_total_ada = utxo_total / 1_000_000
-            raise ShelleyError(
+            raise NodeCLIError(
                 f"Transaction failed due to insufficient funds. Account "
                 f"{payment_addr} cannot pay transaction costs of {cost_ada} "
                 f"lovelaces because it only contains {utxo_total_ada} ADA."
@@ -1491,7 +1420,7 @@ class ShelleyTools:
         if not offline:
             self.submit_transaction(tx_signed_file, cleanup)
         else:
-            print(f"Signed transaction file saved to: {tx_signed_file}")
+            self.logger.info(f"Signed transaction file saved to: {tx_signed_file}")
 
     def update_stake_pool_registration(
         self,
@@ -1581,10 +1510,7 @@ class ShelleyTools:
             folder = self.working_dir
         else:
             folder = Path(folder)
-            if self.ssh is None:
-                folder.mkdir(parents=True, exist_ok=True)
-            else:
-                self.run_cli(f'mkdir -p "{folder}"')
+            folder.mkdir(parents=True, exist_ok=True)
 
         # Get the hash of the JSON file if the URL is provided and the hash is
         # not specified.
@@ -1711,7 +1637,7 @@ class ShelleyTools:
         if utxo_total < min_fee:
             cost_ada = (min_fee + pool_deposit) / 1_000_000
             utxo_total_ada = utxo_total / 1_000_000
-            raise ShelleyError(
+            raise NodeCLIError(
                 f"Transaction failed due to insufficient funds. Account "
                 f"{payment_addr} cannot pay transaction costs of {cost_ada} "
                 f"lovelaces because it only contains {utxo_total_ada} ADA."
@@ -1745,7 +1671,7 @@ class ShelleyTools:
         if not offline:
             self.submit_transaction(tx_signed_file, cleanup)
         else:
-            print(f"Signed transaction file saved to: {tx_signed_file}")
+            self.logger.info(f"Signed transaction file saved to: {tx_signed_file}")
 
     def retire_stake_pool(
         self,
@@ -1795,7 +1721,7 @@ class ShelleyTools:
         if remaining_epochs < 1:
             remaining_epochs = 1
         elif remaining_epochs > e_max:
-            raise ShelleyError(
+            raise NodeCLIError(
                 f"Invalid number of remaining epochs ({remaining_epochs}) "
                 f"prior to pool retirement. The maximum is {e_max}."
             )
@@ -1852,7 +1778,7 @@ class ShelleyTools:
         if utxo_total < min_fee:
             # cost_ada = min_fee/1_000_000
             utxo_total_ada = utxo_total / 1_000_000
-            raise ShelleyError(
+            raise NodeCLIError(
                 f"Transaction failed due to insufficient funds. Account "
                 f"{payment_addr} cannot pay transaction costs of {min_fee} "
                 f"lovelaces because it only contains {utxo_total_ada} ADA."
@@ -1947,7 +1873,7 @@ class ShelleyTools:
         # Calculate the amount to withdraw.
         rewards = self.get_rewards_balance(stake_addr)
         if rewards <= 0.0:
-            raise ShelleyError(
+            raise NodeCLIError(
                 f"No rewards availible in stake address {stake_addr}."
             )
         withdrawal_str = f"{stake_addr}+{rewards}"
@@ -1957,7 +1883,7 @@ class ShelleyTools:
             payment_addr = receive_addr
         utxos = self.get_utxos(payment_addr)
         if len(utxos) < 1:
-            raise ShelleyError(
+            raise NodeCLIError(
                 f"Transaction failed due to insufficient funds. "
                 f"Account {payment_addr} cannot pay transaction costs because "
                 "it does not contain any ADA."
@@ -2021,7 +1947,7 @@ class ShelleyTools:
             cost_ada = min_fee / 1_000_000
             utxo_total_ada = utxo_total / 1_000_000
             a = receive_addr if payment_addr == receive_addr else payment_addr
-            raise ShelleyError(
+            raise NodeCLIError(
                 f"Transaction failed due to insufficient funds. "
                 f"Account {a} cannot pay transaction costs of {cost_ada} "
                 f"ADA because it only contains {utxo_total_ada} ADA."
@@ -2065,7 +1991,7 @@ class ShelleyTools:
         if not offline:
             self.submit_transaction(tx_signed_file, cleanup)
         else:
-            print(f"Signed transaction file saved to: {tx_signed_file}")
+            self.logger.info(f"Signed transaction file saved to: {tx_signed_file}")
 
     def convert_itn_keys(self, itn_prv_key, itn_pub_key, folder=None) -> str:
         """Convert ITN account keys to Shelley staking keys.
@@ -2086,7 +2012,7 @@ class ShelleyTools:
 
         Raises
         ------
-        ShelleyError
+        NodeCLIError
             If the private key is not in a known format.
         """
 
@@ -2096,10 +2022,7 @@ class ShelleyTools:
             folder = self.working_dir
         else:
             folder = Path(folder)
-            if self.ssh is None:
-                folder.mkdir(parents=True, exist_ok=True)
-            else:
-                self.run_cli(f'mkdir -p "{folder}"')
+            folder.mkdir(parents=True, exist_ok=True)
 
         # Open the private key file to check its format.
         prvkey = open(itn_prv_key, "r").read()
@@ -2125,7 +2048,7 @@ class ShelleyTools:
                 f"--out-file {skey_file}"
             )
         else:
-            raise ShelleyError("Invalid ITN private key format.")
+            raise NodeCLIError("Invalid ITN private key format.")
 
         # Convert the public key
         vkey_file = folder / (Path(itn_pub_key).stem + "_shelley_staking.vkey")
@@ -2165,9 +2088,9 @@ class ShelleyTools:
             f"{stake_addr} {self.network}"
         )
         if "Failed" in result.stdout:
-            raise ShelleyError(result.stdout)
+            raise NodeCLIError(result.stdout)
         if len(result.stderr) > 0:
-            raise ShelleyError(result.stderr)
+            raise NodeCLIError(result.stderr)
         info = json.loads(result.stdout)
         balance = sum(b["rewardAccountBalance"] for b in info)
         return balance
@@ -2220,7 +2143,7 @@ class ShelleyTools:
         )
 
         if min_fee > bal:
-            raise ShelleyError(
+            raise NodeCLIError(
                 f"Transaction failed due to insufficient funds. "
                 f"Account {from_addr} cannot send {bal/1_000_000} ADA plus "
                 f"fees of {min_fee/1_000_000} ADA to account {to_addr} "
@@ -2253,7 +2176,7 @@ class ShelleyTools:
         if not offline:
             self.submit_transaction(tx_signed_file, cleanup)
         else:
-            print(f"Signed transaction file saved to: {tx_signed_file}")
+            self.logger.info(f"Signed transaction file saved to: {tx_signed_file}")
 
     def days2slots(self, days, genesis_file) -> int:
         """Convert time in days to time in slots.
@@ -2304,6 +2227,817 @@ class ShelleyTools:
         epoch_dur_slots = json.loads(json_data)["epochLength"]
 
         return float(dur_slots)/epoch_dur_slots
+    
+    def generate_policy(self, script_path) -> str:
+        """Generate a minting policy ID.
+
+        Parameters
+        ----------
+        script_path : str or Path
+            Path to the minting policy definition script.
+
+        Returns
+        -------
+        str
+            The minting policy id (script hash).
+        """
+
+        # Submit the transaction
+        result = self.run_cli(
+            f"{self.cli} transaction policyid "
+            f" --script-file {script_path}"
+        )
+        return result.stdout
+
+    def calc_min_utxo(self, assets) -> int:
+        """Calculate the minimum UTxO value when assets are part of the
+        transaction.
+
+        Parameters
+        ----------
+        assets : list
+            A list of assets in the format policyid.name.
+
+        Returns
+        -------
+        int
+            The minimum transaction output (Lovelace).
+        """
+
+        # Ensure the parameters file exists
+        self.load_protocol_parameters()
+
+        # Use the globally defined function
+        return utils.minimum_utxo(assets, self.protocol_parameters)
+    
+    def _get_token_utxos(self, addr, policy_id, asset_names, quantities):
+        """Get a list of UTxOs that contain the desired assets.
+        
+        Parameters
+        ----------
+        addr : str
+            The address containing the UTxOs with the desired assets.
+        policy_id : str
+            Policy ID for the assets (single policy only).
+        asset_names : list
+            List of asset names (hex format strings).
+        quantities : list
+            List of quantities (integers) of the tokens.
+        """
+
+        # Make a list of all asset names (unique!)
+        send_assets = {}
+        for name, amt in zip(asset_names, quantities):
+            asset = f"{policy_id}.{name}" if name else policy_id
+            if asset in send_assets:
+                send_assets[asset] += amt
+            else:
+                send_assets[asset] = amt
+
+        # Get a list of UTxOs for the transaction
+        utxos = []
+        input_str = ""
+        input_lovelace = 0
+        for i, asset in enumerate(send_assets.keys()):
+
+            # Find all the UTxOs containing the assets desired. This may take a
+            # while if there are a lot of tokens!
+            utxos_found = self.get_utxos(addr, filter=asset)
+
+            # Iterate through the UTxOs and only take enough needed to process
+            # the requested amount of tokens. Also, only create a list of unique
+            # UTxOs.
+            asset_count = 0
+            for utxo in utxos_found:
+
+                # UTxOs could show up twice if they contain multiple different
+                # assets. Only put them in the list once.
+                if utxo not in utxos:
+                    utxos.append(utxo)
+
+                    # If this is a unique UTxO being added to the list, keep
+                    # track of the total Lovelaces and add it to the
+                    # transaction input string.
+                    input_lovelace += int(utxo["Lovelace"])
+                    input_str += f"--tx-in {utxo['TxHash']}#{utxo['TxIx']} "
+
+                asset_count += int(utxo[asset])
+                if asset_count >= quantities[i]:
+                    break
+
+            if asset_count < quantities[i]:
+                raise NodeCLIError(f"Not enought {asset} tokens availible.")
+
+        # If we get to this point, we have enough UTxOs to cover the requested
+        # tokens. Next we need to build lists of the output and return tokens.
+        output_tokens = {}
+        return_tokens = {}
+        for utxo in utxos:
+            # Iterate through the UTxO entries.
+            for k in utxo.keys():
+                if k in ["TxHash", "TxIx", "Lovelace"]:
+                    pass  # These are the UTxO IDs in every UTxO.
+                elif k in send_assets:
+                    # These are the native assets requested.
+                    if k in output_tokens:
+                        output_tokens[k] += int(utxo[k])
+                    else:
+                        output_tokens[k] = int(utxo[k])
+
+                    # If the UTxOs selected for the transaction contain more
+                    # tokens than requested, clip the number of output tokens
+                    # and put the remainder as returning tokens.
+                    if output_tokens[k] > send_assets[k]:
+                        return_tokens[k] = output_tokens[k] - send_assets[k]
+                        output_tokens[k] = send_assets[k]
+                else:
+                    # These are tokens that are not being requested so they just
+                    # need to go back to the wallet in another output.
+                    if k in return_tokens:
+                        return_tokens[k] += int(utxo[k])
+                    else:
+                        return_tokens[k] = int(utxo[k])
+
+        # Note: at this point output_tokens should be the same as send_assets.
+        # It was necessary to build another dict of output tokens as we
+        # iterated through the list of UTxOs for proper accounting.
+
+        # Return the computed results as a tuple to be used for building a token
+        # transaction.
+        return (input_str, input_lovelace, output_tokens, return_tokens)
+    
+    def build_send_tx(
+        self,
+        to_addr,
+        from_addr,
+        quantity,
+        policy_id,
+        asset_name=None,
+        ada=0.0,
+        folder=None,
+        cleanup=True,
+    ):
+        """Build a transaction for sending an integer number of native assets
+        from one address to another.
+
+        Opinionated: Only send 1 type of Native Token at a time. Will only
+        combine additional ADA-only UTxOs when paying for the transactions fees
+        and minimum UTxO ADA values if needed.
+
+        Parameters
+        ----------
+        to_addr : str
+            Address to send the asset to.
+        from_addr : str
+            Address to send the asset from.
+        quantity : float
+            Integer number of assets to send.
+        policy_id : str
+            Policy ID of the asset to be sent.
+        asset_name : str, optional
+            Asset name if applicable (ASCII strings).
+        ada : float, optional
+            Optionally set the amount of ADA to be sent with the token.
+        folder : str or Path, optional
+            The working directory for the function.
+        cleanup : bool, optional
+            Flag that indicates if the temporary transaction files should be
+            removed when finished (defaults to True).
+        """
+
+        # This is a constant modifier to determine the minimum ADA for breaking
+        # off additional ADA into a separate UTxO. It essentially prevents
+        # oscillations at potential bifurcation points where adding or taking
+        # away a transaction output puts the extra ADA under or over the
+        # minimum UTxO due to transaction fees. This parameter may need to be
+        # tuned, but should be fairly small.
+        minMult = 1.1
+
+        # Get a working directory to store the generated files and make sure
+        # the directory exists.
+        if folder is None:
+            folder = self.working_dir
+        else:
+            folder = Path(folder)
+            folder.mkdir(parents=True, exist_ok=True)
+
+        # Make sure the qunatity is positive.
+        quantity = abs(quantity)
+
+        # Convert asset name to hex
+        asset_name = "".join(
+            "{:02x}".format(c) for c in asset_name.encode("utf-8")
+        )
+
+        # Get the required UTxO(s) for the requested token.
+        (
+            input_str,
+            input_lovelace,
+            output_tokens,
+            return_tokens,
+        ) = self._get_token_utxos(
+            from_addr, policy_id, [asset_name], [quantity]
+        )
+
+        # Build token input and output strings
+        output_token_utxo_str = ""
+        for token in output_tokens.keys():
+            output_token_utxo_str += f" + {output_tokens[token]} {token}"
+        return_token_utxo_str = ""
+        for token in return_tokens.keys():
+            return_token_utxo_str += f" + {return_tokens[token]} {token}"
+
+        # Calculate the minimum ADA for the token UTxOs.
+        min_utxo_out = self.calc_min_utxo(output_tokens.keys())
+        min_utxo_ret = self.calc_min_utxo(return_tokens.keys())
+
+        # Lovelace to send with the Token
+        utxo_out = max([min_utxo_out, int(ada * 1_000_000)])
+
+        # Lovelaces to return to the wallet
+        utxo_ret = min_utxo_ret
+        if len(return_tokens) == 0:
+            utxo_ret = 0
+
+        # Determine the TTL
+        tip = self.get_tip()
+        ttl = tip + self.ttl_buffer
+
+        # Ensure the parameters file exists
+        min_utxo = self.get_min_utxo()
+
+        # Create a metadata string
+        meta_str = ""  # Maybe add later
+
+        # Get a list of Lovelace only UTxOs and sort them in ascending order
+        # by value. We may not end up needing these.
+        ada_utxos = self.get_utxos(from_addr, filter="Lovelace")
+        ada_utxos.sort(key=lambda k: k["Lovelace"], reverse=False)
+
+        # Create a name for the transaction files.
+        tx_name = datetime.now().strftime("tx_%Y-%m-%d_%Hh%Mm%Ss")
+        tx_draft_file = Path(self.working_dir) / (tx_name + ".draft")
+
+        # Create a TX out string given the possible scenarios.
+        use_ada_utxo = False
+        if len(return_tokens) == 0:
+            if (input_lovelace - utxo_out) < minMult * min_utxo:
+                output_str = f'--tx-out "{to_addr}+0{output_token_utxo_str}" '
+            else:
+                output_str = (
+                    f'--tx-out "{to_addr}+0{output_token_utxo_str}" '
+                    f'--tx-out "{from_addr}+0" '
+                )
+                use_ada_utxo = True
+        else:
+            if (input_lovelace - utxo_out - utxo_ret) < minMult * min_utxo:
+                output_str = (
+                    f'--tx-out "{to_addr}+0{output_token_utxo_str}" '
+                    f'--tx-out "{from_addr}+0{return_token_utxo_str}" '
+                )
+            else:
+                output_str = (
+                    f'--tx-out "{to_addr}+0{output_token_utxo_str}" '
+                    f'--tx-out "{from_addr}+0{return_token_utxo_str}" '
+                    f'--tx-out "{from_addr}+0" '
+                )
+                use_ada_utxo = True
+
+        # Calculate the minimum transaction fee as it is right now with only the
+        # minimum UTxOs needed for the tokens.
+        self.run_cli(
+            f"{self.cli} transaction build-raw {input_str}"
+            f"{output_str} --ttl 0 --fee 0 {meta_str} "
+            f"{self.era} --out-file {tx_draft_file}"
+        )
+        min_fee = self.calc_min_fee(
+            tx_draft_file,
+            input_str.count("--tx-in "),
+            tx_out_count=output_str.count("--tx-out "),
+            witness_count=1,
+        )
+
+        # If we don't have enough ADA, we will have to add another UTxO to cover
+        # the transaction fees.
+        if input_lovelace < (min_fee + utxo_ret + utxo_out):
+
+            # Iterate through the UTxOs until we have enough funds to cover the
+            # transaction. Also, update the tx_in string for the transaction.
+            for idx, utxo in enumerate(ada_utxos):
+                input_lovelace += int(utxo["Lovelace"])
+                input_str += f"--tx-in {utxo['TxHash']}#{utxo['TxIx']} "
+
+                self.run_cli(
+                    f"{self.cli} transaction build-raw {input_str}"
+                    f"{output_str} --ttl 0 --fee 0 {meta_str} "
+                    f"{self.era} --out-file {tx_draft_file}"
+                )
+                min_fee = self.calc_min_fee(
+                    tx_draft_file,
+                    input_str.count("--tx-in "),
+                    tx_out_count=output_str.count("--tx-out "),
+                    witness_count=1,
+                )
+
+                # If we don't have enough ADA here, then go ahead and add another
+                # ADA only UTxO.
+                if input_lovelace < (min_fee + utxo_ret + utxo_out):
+                    continue
+
+                # If we do have enough to cover the needed output and fees, check
+                # if we need to add a second UTxO with the extra ADA.
+                if (
+                    input_lovelace - (min_fee + utxo_ret + utxo_out)
+                    > minMult * min_utxo
+                    and output_str.count("--tx-out ") < 3
+                ):
+
+                    self.run_cli(
+                        f"{self.cli} transaction build-raw {input_str}"
+                        f"{output_str} --tx-out {from_addr}+0 "
+                        f"--ttl 0 --fee 0 {meta_str} "
+                        f"{self.era} --out-file {tx_draft_file}"
+                    )
+                    min_fee = self.calc_min_fee(
+                        tx_draft_file,
+                        input_str.count("--tx-in "),
+                        tx_out_count=output_str.count("--tx-out "),
+                        witness_count=1,
+                    )
+
+                    # Flag that we are using an extra ADA only UTxO.
+                    use_ada_utxo = True
+
+                # We should be good here
+                break  # <-- Important!
+
+        # Handle the error case where there is not enough inputs for the output
+        if input_lovelace < (min_fee + utxo_ret + utxo_out):
+            raise NodeCLIError(
+                f"Transaction failed due to insufficient funds. Account "
+                f"{from_addr} needs an additional ADA only UTxO."
+            )
+
+        # Figure out the amount of ADA to put with the different UTxOs.
+        # If we have tokens being returned to the wallet, only keep the minimum
+        # ADA in that UTxO and make an extra ADA only UTxO.
+        utxo_ret_ada = 0
+        if use_ada_utxo:
+            if len(return_tokens) == 0:
+                utxo_ret_ada = input_lovelace - utxo_out - min_fee
+            else:
+                utxo_ret_ada = input_lovelace - utxo_ret - utxo_out - min_fee
+        else:
+            if len(return_tokens) == 0:
+                min_fee += input_lovelace - utxo_out - min_fee
+            else:
+                utxo_ret += input_lovelace - utxo_ret - utxo_out - min_fee
+
+        # Build the transaction to send to the blockchain.
+        token_return_utxo_str = ""
+        if utxo_ret > 0:
+            token_return_utxo_str = (
+                f'--tx-out "{from_addr}+{utxo_ret}{return_token_utxo_str}"'
+            )
+        token_return_ada_str = ""
+        if utxo_ret_ada > 0:
+            token_return_ada_str = f"--tx-out {from_addr}+{utxo_ret_ada}"
+        tx_raw_file = Path(self.working_dir) / (tx_name + ".raw")
+
+        self.run_cli(
+            f"{self.cli} transaction build-raw {input_str}"
+            f'--tx-out "{to_addr}+{utxo_out}{output_token_utxo_str}" '
+            f"{token_return_utxo_str} {token_return_ada_str} "
+            f"--ttl {ttl} --fee {min_fee} {self.era} "
+            f"--out-file {tx_raw_file}"
+        )
+
+        # Delete the intermediate transaction files if specified.
+        if cleanup:
+            self._cleanup_file(tx_draft_file)
+
+        # Return the path to the raw transaction file.
+        return tx_raw_file
+
+    def build_mint_transaction(
+        self,
+        policy_id,
+        asset_names,
+        quantities,
+        payment_addr,
+        witness_count,
+        minting_script,
+        tx_metadata=None,
+        ada=0.0,
+        folder=None,
+        cleanup=True,
+    ) -> str:
+        """Build the transaction for minting a new native asset.
+
+        Requires a running and synced node.
+
+        Parameters
+        ----------
+        policy_id : str
+            The minting policy ID (generated from the signature script).
+        asset_names : list
+            A list of asset names (ASCII strings).
+        quantities : list
+            A list of asset quantities.
+        payment_addr : str
+            The address paying the minting fees. Will also own the tokens.
+        witness_count : int
+            The number of signing keys.
+        minting_script:
+
+        tx_metadata : str or Path, optional
+            Path to the metadata stored in a JSON file.
+        ada : float, optional
+            Optionally set the amount of ADA to be included with the tokens.
+        folder : str or Path, optional
+            The working directory for the function. Will use the Shelley
+            object's working directory if node is given.
+        cleanup : bool, optional
+            Flag that indicates if the temporary transaction files should be
+            removed when finished (defaults to True).
+
+        Return
+        ------
+        str
+            Path to the mint transaction file generated.
+        """
+
+        # This is a constant modifier to determine the minimum ADA for breaking
+        # off additional ADA into a separate UTxO. It essentially prevents
+        # oscillations at potential bifurcation points where adding or taking
+        # away a transaction output puts the extra ADA under or over the
+        # minimum UTxO due to transaction fees. This parameter may need to be
+        # tuned bust should be fairly small.
+        minMult = 2.1
+
+        # Get a working directory to store the generated files and make sure
+        # the directory exists.
+        if folder is None:
+            folder = self.working_dir
+        else:
+            folder = Path(folder)
+            folder.mkdir(parents=True, exist_ok=True)
+        
+        # Convert asset names to hex strings
+        for n, name in enumerate(asset_names):
+            asset_names[n] = "".join(
+                "{:02x}".format(c) for c in name.encode("utf-8")
+            )
+
+        # Make sure all names are unique and the quantities match the names.
+        # Giving a name is optional. So, if no names, one quantitiy value is
+        # required.
+        asset_names = list(set(asset_names))
+        if len(asset_names) == 0:
+            if len(quantities) != 1:
+                raise NodeCLIError("Invalid list of quantities.")
+        else:
+            if len(quantities) != len(asset_names):
+                raise NodeCLIError("Invalid combination of names and quantities.")
+        for q in quantities:
+            if q < 1:
+                raise NodeCLIError("Invalid quantity for minting!")
+
+        # Get a list of ADA only UTXOs and sort them in ascending order by
+        # value.
+        utxos = self.get_utxos(payment_addr, filter="Lovelace")
+        utxos.sort(key=lambda k: k["Lovelace"], reverse=True)
+        if len(utxos) < 1:
+            raise NodeCLIError("No ADA only UTxOs for minting.")
+
+        # Determine the TTL
+        tip = self.get_tip()
+        ttl = tip + self.ttl_buffer
+
+        # Calculate the minimum UTxO
+        min_utxo = self.get_min_utxo()
+        mint_assets = [f"{policy_id}.{name}" for name in asset_names]
+        if len(mint_assets) == 0:
+            mint_assets = [policy_id]
+        min_love = self.calc_min_utxo(mint_assets)
+
+        # Lovelace to send with the Token
+        utxo_out = max([min_love, int(ada * 1_000_000)])
+
+        # Create minting string
+        mint_str = ""
+        if len(asset_names) == 0:
+            mint_str += f"{quantities[0]} {policy_id}"
+        else:
+            for i, name in enumerate(asset_names):
+                sep = " + " if i != 0 else ""
+                mint_str += f"{sep}{quantities[i]} {policy_id}.{name}"
+
+        # Create a metadata string
+        meta_str = ""
+        if tx_metadata is not None:
+            meta_str = f"--metadata-json-file {tx_metadata}"
+
+        # Create a minting script string
+        script_str = f"--minting-script-file {minting_script}"
+
+        tx_name = datetime.now().strftime("tx_%Y-%m-%d_%Hh%Mm%Ss")
+        tx_draft_file = Path(self.working_dir) / (tx_name + ".draft")
+
+        # Iterate through the ADA only UTxOs until we have enough funds to
+        # cover the transaction. Also, create the tx_in string for the
+        # transaction.
+        utxo_ret_ada = 0
+        utxo_total = 0
+        tx_in_str = ""
+        for idx, utxo in enumerate(utxos):
+            # Add an availible UTxO to the list and then check to see if we now
+            # have enough lovelaces to cover the transaction fees and what we
+            # want with the tokens.
+            utxo_count = idx + 1
+            utxo_total += int(utxo["Lovelace"])
+            tx_in_str += f"--tx-in {utxo['TxHash']}#{utxo['TxIx']} "
+
+            # Build a transaction draft with a single output.
+            self.run_cli(
+                f"{self.cli} transaction build-raw {tx_in_str}"
+                f'--tx-out "{payment_addr}+{utxo_total}+{mint_str}" '
+                f"--ttl 0 --fee 0 "
+                f'--mint "{mint_str}" {script_str} {meta_str} '
+                f"{self.era} --out-file {tx_draft_file}"
+            )
+
+            # Calculate the minimum fee for the transaction with a single
+            # minting output.
+            min_fee = self.calc_min_fee(
+                tx_draft_file,
+                utxo_count,
+                tx_out_count=1,
+                witness_count=witness_count,
+            )
+
+            # If we don't have enough ADA here, then go ahead and add another
+            # ADA only UTxO.
+            if utxo_total < (min_fee + utxo_out):
+                continue
+
+            # If we do have enough to cover the needed output and fees, check
+            # if we need to add a second UTxO with the extra ADA.
+            if utxo_total - (min_fee + utxo_out) > minMult * min_utxo:
+
+                # Create a draft transaction with an extra ADA only UTxO.
+                self.run_cli(
+                    f"{self.cli} transaction build-raw {tx_in_str}"
+                    f'--tx-out "{payment_addr}+{utxo_total}+{mint_str}" '
+                    f'--tx-out "{payment_addr}+0" --ttl 0 --fee 0 '
+                    f'--mint "{mint_str}" {script_str} {meta_str} '
+                    f"{self.era} --out-file {tx_draft_file}"
+                )
+
+                # Calculate the minimum fee for the transaction with an extra
+                # ADA only UTxO.
+                min_fee = self.calc_min_fee(
+                    tx_draft_file,
+                    utxo_count,
+                    tx_out_count=2,
+                    witness_count=witness_count,
+                )
+
+                # Save the amount of ADA that we are returning in a separate
+                # UTxO.
+                utxo_ret_ada = utxo_total - (min_fee + utxo_out)
+
+            else:
+                # If we are staying with the single UTxO result. Make sure any
+                # overages are just added to the output so the transaction
+                # balances.
+                utxo_out += utxo_total - (min_fee + utxo_out)
+
+            # We should be good to go here.
+            break
+
+        # Handle the error case where there is not enough inputs for the output
+        if utxo_total < (min_fee + utxo_out):
+            cost_ada = (min_fee + utxo_out) / 1_000_000
+            utxo_total_ada = utxo_total / 1_000_000
+            raise NodeCLIError(
+                f"Transaction failed due to insufficient funds. Account "
+                f"{payment_addr} cannot pay tranction costs of {cost_ada} "
+                f"ADA because it only contains {utxo_total_ada} ADA."
+            )
+
+        # Build the transaction to send to the blockchain.
+        token_return_ada_str = ""
+        if utxo_ret_ada > 0:
+            token_return_ada_str = f"--tx-out {payment_addr}+{utxo_ret_ada}"
+        tx_raw_file = Path(self.working_dir) / (tx_name + ".raw")
+        self.run_cli(
+            f"{self.cli} transaction build-raw {tx_in_str}"
+            f'--tx-out "{payment_addr}+{utxo_out}+{mint_str}" '
+            f"{token_return_ada_str} --ttl {ttl} --fee {min_fee} "
+            f'--mint "{mint_str}" {script_str} {meta_str} '
+            f"{self.era} --out-file {tx_raw_file}"
+        )
+
+        # Delete the intermediate transaction files if specified.
+        if cleanup:
+            self._cleanup_file(tx_draft_file)
+
+        # Return the path to the raw transaction file.
+        return tx_raw_file
+
+    def build_burn_transaction(
+        self,
+        policy_id,
+        asset_names,
+        quantities,
+        payment_addr,
+        witness_count,
+        minting_script,
+        tx_metadata=None,
+        folder=None,
+        cleanup=True,
+    ) -> str:
+        """Build the transaction for burning a native asset.
+
+        Requires a running and synced node.
+
+        Parameters
+        ----------
+        policy_id : str
+            The minting policy ID generated from the signature script--the
+            same for all assets.
+        asset_names : list
+            List of asset names (same size as quantity list) [ASCII strings].
+        quantities : list
+            List of the numbers of each asset to burn.
+        payment_addr : str
+            The address paying the minting fees. Will also contain the tokens.
+        witness_count : int
+            The number of signing keys.
+        tx_metadata : str or Path, optional
+            Path to the metadata stored in a JSON file.
+        folder : str or Path, optional
+            The working directory for the function. Will use the Shelley
+            object's working directory if node is given.
+        cleanup : bool, optional
+            Flag that indicates if the temporary transaction files should be
+            removed when finished (defaults to True).
+
+        Return
+        ------
+        str
+            Path to the mint transaction file generated.
+        """
+
+        # Get a working directory to store the generated files and make sure
+        # the directory exists.
+        if folder is None:
+            folder = self.working_dir
+        else:
+            folder = Path(folder)
+            folder.mkdir(parents=True, exist_ok=True)
+
+        # Convert asset names to hex strings
+        for n, name in enumerate(asset_names):
+            asset_names[n] = "".join(
+                "{:02x}".format(c) for c in name.encode("utf-8")
+            )
+
+        # Make sure all names are unique and the quantities match the names.
+        # Giving a name is optional. So, if no names, one quantitiy value is
+        # required.
+        asset_names = list(set(asset_names))
+        if len(asset_names) == 0:
+            if len(quantities) != 1:
+                raise NodeCLIError("Invalid list of quantities.")
+        else:
+            if len(quantities) != len(asset_names):
+                raise NodeCLIError("Invalid combination of names and quantities.")
+
+        # Users may send the quantities in as negative values since we are
+        # burining. However, the quantities must be positive for the
+        # calculations prior to the transaction. The negative sign will be
+        # added to the mint inputs appropriately.
+        quantities = [abs(q) for q in quantities]
+
+        # Get the required UTxO(s) for the requested token.
+        (
+            input_str,
+            input_lovelace,
+            output_tokens,
+            return_tokens,
+        ) = self._get_token_utxos(
+            payment_addr, policy_id, asset_names, quantities
+        )
+
+        # Determine the TTL
+        tip = self.get_tip()
+        ttl = tip + self.ttl_buffer
+
+        # Get the minimum ADA only UTxO size.
+        min_utxo = self.get_min_utxo()
+
+        # Create transaction strings for the tokens. The minting input string
+        # and the UTxO string for any remaining tokens.
+        burn_str = ""
+        token_utxo_str = ""
+        for i, asset in enumerate(output_tokens.keys()):
+            sep = " + " if i != 0 else ""
+            burn_str += f"{sep}{-1*output_tokens[asset]} {asset}"
+        for asset in return_tokens.keys():
+            token_utxo_str += f" + {return_tokens[asset]} {asset}"
+
+        # Create a metadata string
+        meta_str = ""
+        if tx_metadata is not None:
+            meta_str = f"--metadata-json-file {tx_metadata}"
+        
+        # Create a minting script string
+        script_str = f"--minting-script-file {minting_script}"
+
+        # Calculate the minimum fee and UTxO sizes for the transaction as it is
+        # right now with only the minimum UTxOs needed for the tokens.
+        tx_name = datetime.now().strftime("tx_%Y-%m-%d_%Hh%Mm%Ss")
+        tx_draft_file = Path(self.working_dir) / (tx_name + ".draft")
+        self.run_cli(
+            f"{self.cli} transaction build-raw {input_str}"
+            f'--tx-out "{payment_addr}+{input_lovelace}{token_utxo_str}" '
+            f'--ttl 0 --fee 0 --mint "{burn_str}" {script_str} {meta_str} '
+            f"{self.era} --out-file {tx_draft_file}"
+        )
+        min_fee = self.calc_min_fee(
+            tx_draft_file,
+            utxo_count := input_str.count("--tx-in "),
+            tx_out_count=1,
+            witness_count=witness_count,
+        )
+        min_utxo_ret = self.calc_min_utxo(return_tokens.keys())
+
+        # If we don't have enough ADA, we will have to add another UTxO to cover
+        # the transaction fees.
+        if input_lovelace < min_fee + min_utxo_ret:
+
+            # Get a list of Lovelace only UTxOs and sort them in ascending order
+            # by value.
+            ada_utxos = self.get_utxos(payment_addr, filter="Lovelace")
+            ada_utxos.sort(key=lambda k: k["Lovelace"], reverse=False)
+
+            # Iterate through the UTxOs until we have enough funds to cover the
+            # transaction. Also, update the tx_in string for the transaction.
+            for utxo in ada_utxos:
+                utxo_count += 1
+                input_lovelace += int(utxo["Lovelace"])
+                input_str += f"--tx-in {utxo['TxHash']}#{utxo['TxIx']} "
+
+                # Build a transaction draft
+                self.run_cli(
+                    f"{self.cli} transaction build-raw {input_str}"
+                    f'--tx-out "{payment_addr}+{input_lovelace}{token_utxo_str}" '
+                    f'--ttl 0 --fee 0 --mint "{burn_str}" {script_str} {meta_str} '
+                    f"{self.era} --out-file {tx_draft_file}"
+                )
+
+                # Calculate the minimum fee
+                min_fee = self.calc_min_fee(
+                    tx_draft_file,
+                    utxo_count,
+                    tx_out_count=1,
+                    witness_count=witness_count,
+                )
+
+                # If we have enough Lovelaces to cover the transaction, we can stop
+                # iterating through the UTxOs.
+                if input_lovelace > (min_fee + min_utxo_ret):
+                    break
+
+        # Handle the error case where there is not enough inputs for the output
+        if input_lovelace < min_fee + min_utxo_ret:
+            raise NodeCLIError(
+                f"Transaction failed due to insufficient funds. Account "
+                f"{payment_addr} needs an additional ADA only UTxO."
+            )
+
+        # Build the transaction to the blockchain.
+        utxo_amt = input_lovelace - min_fee
+        if utxo_amt < min_utxo:
+            min_fee = utxo_amt
+            utxo_amt = 0
+        tx_raw_file = Path(self.working_dir) / (tx_name + ".raw")
+        self.run_cli(
+            f"{self.cli} transaction build-raw {input_str}"
+            f'--tx-out "{payment_addr}+{utxo_amt}{token_utxo_str}" '
+            f'--ttl {ttl} --fee {min_fee} --mint "{burn_str}" {script_str} {meta_str} '
+            f"{self.era} --out-file {tx_raw_file}"
+        )
+
+        # Delete the intermediate transaction files if specified.
+        if cleanup:
+            self._cleanup_file(tx_draft_file)
+
+        # Return the path to the raw transaction file.
+        return tx_raw_file
+
 
 
 if __name__ == "__main__":
