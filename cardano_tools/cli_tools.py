@@ -26,8 +26,8 @@ class NodeCLIError(Exception):
 class NodeCLI:
     def __init__(
         self,
-        path_to_cli,
-        path_to_socket,
+        binary_path,
+        socket_path,
         working_dir,
         ttl_buffer=1000,
         network="--mainnet",
@@ -40,11 +40,11 @@ class NodeCLI:
 
         # Set the socket path, it must be set as an environment variable.
         # Set this first because its used during setup.
-        self.socket = path_to_socket
+        self.socket = socket_path
 
         # Set the path to the CLI and verify it works. An exception will be
         # thrown if the command is not found.
-        self.cli = path_to_cli
+        self.cli = binary_path
         self.check_node_version()
 
         # Set the working directory and make sure it exists.
@@ -60,8 +60,8 @@ class NodeCLI:
 
     def check_node_version(self):
         res = self.run_cli(f"{self.cli} --version")
-        if (res.stdout.split(" ")[1] != LATEST_SUPPORTED_NODE_VERSION):
-            self.logger.warn(f'Unsuported cardano-node version.')
+        if res.stdout.split(" ")[1] != LATEST_SUPPORTED_NODE_VERSION:
+            self.logger.warn(f"Unsupported cardano-node version.")
 
     def run_cli(self, cmd):
         os.environ["CARDANO_NODE_SOCKET_PATH"] = self.socket
@@ -96,8 +96,7 @@ class NodeCLI:
         """
         params_file = self.working_dir / "protocol.json"
         self.run_cli(
-            f"{self.cli} query protocol-parameters {self.network} "
-            f"--out-file {params_file}"
+            f"{self.cli} query protocol-parameters {self.network} " f"--out-file {params_file}"
         )
         json_data = self._load_text_file(params_file)
         self.protocol_parameters = json.loads(json_data)
@@ -105,7 +104,7 @@ class NodeCLI:
 
     def get_min_utxo(self) -> int:
         """Get the minimum ADA only UTxO size."""
-        
+
         # Ensure the parameters file exists
         self.load_protocol_parameters()
 
@@ -114,9 +113,9 @@ class NodeCLI:
         utxo_entry_size_without_val = 27
         ada_only_utxo_size = utxo_entry_size_without_val + coin_Size
 
-        # Calculate the minimum UTxO from network parameters 
+        # Calculate the minimum UTxO from network parameters
         utxo_cost_word = self.protocol_parameters["utxoCostPerWord"]
-        return ada_only_utxo_size*utxo_cost_word
+        return ada_only_utxo_size * utxo_cost_word
 
     def cli_tip_query(self):
         """Query the node for the current tip of the blockchain.
@@ -128,26 +127,23 @@ class NodeCLI:
             raise NodeCLIError(result.stderr)
         vals = json.loads(result.stdout)
         return vals
-    
+
     def get_epoch(self) -> int:
-        """Query the node for the current epoch.
-        """
+        """Query the node for the current epoch."""
         vals = self.cli_tip_query()
         if float(vals["syncProgress"]) != 100.0:
             self.logger.warn("Node not fully synced!")
         return vals["epoch"]
-    
+
     def get_tip(self) -> int:
-        """Query the node for the current tip of the blockchain.
-        """
+        """Query the node for the current tip of the blockchain."""
         vals = self.cli_tip_query()
         if float(vals["syncProgress"]) != 100.0:
             self.logger.warn("Node not fully synced!")
         return vals["slot"]
 
     def make_address(self, name, folder=None) -> str:
-        """Create an address and the corresponding payment and staking keys.
-        """
+        """Create an address and the corresponding payment and staking keys."""
         if folder is None:
             folder = self.working_dir
         else:
@@ -208,8 +204,7 @@ class NodeCLI:
             The key hash.
         """
         result = self.run_cli(
-            f"{self.cli} address key-hash "
-            f"--payment-verification-key-file {vkey_path}"
+            f"{self.cli} address key-hash " f"--payment-verification-key-file {vkey_path}"
         )
         return result.stdout
 
@@ -224,7 +219,7 @@ class NodeCLI:
         filter : str, optional
             Filter the UTXOs based on a token ID. If "Lovelace" is passed to
             the filter, UTXOs containing ONLY lovelace will be returned.
- 
+
         Returns
         -------
         list
@@ -233,9 +228,7 @@ class NodeCLI:
 
         # Query the UTXOs for the given address (this will not get everything
         # for a given wallet that contains multiple addresses.)
-        result = self.run_cli(
-            f"{self.cli} query utxo --address {addr} {self.network}"
-        )
+        result = self.run_cli(f"{self.cli} query utxo --address {addr} {self.network}")
         raw_utxos = result.stdout.split("\n")[2:]
 
         # Parse the UTXOs into a list of dict objects
@@ -251,7 +244,7 @@ class NodeCLI:
             # Extra tokens will be separated by a "+" sign.
             extra = [i for i, j in enumerate(vals) if j == "+"]
             for i in extra:
-                if 'TxOutDatum' in vals[i + 1]:
+                if "TxOutDatum" in vals[i + 1]:
                     continue
                 asset = vals[i + 2]
                 amt = vals[i + 1]
@@ -264,19 +257,14 @@ class NodeCLI:
         # Filter utxos
         if filter is not None:
             if filter == "Lovelace":
-                utxos = [
-                    utxo
-                    for utxo in utxos
-                    if filter in utxo and len(utxo.keys()) == 3
-                ]
+                utxos = [utxo for utxo in utxos if filter in utxo and len(utxo.keys()) == 3]
             else:
                 utxos = [utxo for utxo in utxos if filter in utxo]
 
         return utxos
 
     def query_balance(self, addr) -> int:
-        """Query an address balance in lovelace.
-        """
+        """Query an address balance in lovelace."""
         total = 0
         utxos = self.get_utxos(addr)
         for utxo in utxos:
@@ -305,7 +293,7 @@ class NodeCLI:
             The number of transaction signing keys.
         byron_witness_count : int, optional
             Number of Byron witnesses (defaults to 0).
-        
+
         Returns
         -------
         int
@@ -324,9 +312,7 @@ class NodeCLI:
         min_fee = int(result.stdout.split()[0])
         return min_fee
 
-    def send_payment(
-        self, amt, to_addr, from_addr, key_file, offline=False, cleanup=True
-    ):
+    def send_payment(self, amt, to_addr, from_addr, key_file, offline=False, cleanup=True):
         """Send ADA from one address to another.
 
         Parameters
@@ -452,9 +438,7 @@ class NodeCLI:
             )
 
             # Calculate the minimum fee
-            min_fee = self.calc_min_fee(
-                tx_draft_file, utxo_count, tx_out_count=1, witness_count=2
-            )
+            min_fee = self.calc_min_fee(tx_draft_file, utxo_count, tx_out_count=1, witness_count=2)
 
             # TX cost
             cost = min_fee + self.protocol_parameters["stakeAddressDeposit"]
@@ -511,7 +495,7 @@ class NodeCLI:
             Pool name for file/certificate naming.
         folder : str or Path, optional
             The directory where the generated files/certs will be placed.
-        
+
         Returns
         _______
         (str, str)
@@ -537,9 +521,7 @@ class NodeCLI:
 
         return (kes_vkey, kes_skey)
 
-    def create_block_producing_keys(
-        self, genesis_file, pool_name="pool", folder=None
-    ):
+    def create_block_producing_keys(self, genesis_file, pool_name="pool", folder=None):
         """Create keys for a block-producing node.
         WARNING: You may want to use your local machine for this process
         (assuming you have cardano-node and cardano-cli on it). Make sure you
@@ -551,7 +533,7 @@ class NodeCLI:
             VRF Key pair,
             KES Key pair,
             Operational Certificate
-        
+
         Parameters
         ----------
         genesis_file : str or Path
@@ -612,8 +594,7 @@ class NodeCLI:
 
         # Get the pool ID and return it.
         result = self.run_cli(
-            f"{self.cli} stake-pool id "
-            f"--cold-verification-key-file {cold_vkey}"
+            f"{self.cli} stake-pool id " f"--cold-verification-key-file {cold_vkey}"
         )
         pool_id = result.stdout
         self._dump_text_file(folder / (pool_name + ".id"), pool_id)
@@ -676,10 +657,8 @@ class NodeCLI:
         if result.stderr:
             raise NodeCLIError(f"Unable to rotate KES keys: {result.stderr}")
 
-
     def create_metadata_file(self, pool_metadata, folder=None) -> str:
-        """ Create a JSON file with the pool metadata and return the file hash.
-        """
+        """Create a JSON file with the pool metadata and return the file hash."""
 
         # Get a working directory to store the generated files and make sure
         # the directory exists.
@@ -692,12 +671,9 @@ class NodeCLI:
         # Create a JSON file with the pool metadata and return the file hash.
         ticker = pool_metadata["ticker"]
         metadata_file_path = folder / f"{ticker}_metadata.json"
-        self._dump_text_file(
-            metadata_file_path, json.dumps(pool_metadata).strip()
-        )
+        self._dump_text_file(metadata_file_path, json.dumps(pool_metadata).strip())
         result = self.run_cli(
-            f"{self.cli} stake-pool metadata-hash "
-            f"--pool-metadata-file {metadata_file_path}"
+            f"{self.cli} stake-pool metadata-hash " f"--pool-metadata-file {metadata_file_path}"
         )
         metadata_hash = result.stdout.strip()
         return metadata_hash
@@ -719,7 +695,7 @@ class NodeCLI:
     ) -> str:
         """Generate a stake pool certificate.
 
-        This function generates a stake pool registration certificate. It can 
+        This function generates a stake pool registration certificate. It can
         be used without connection to a running node for offline applications.
 
         Parameters
@@ -758,7 +734,7 @@ class NodeCLI:
             download the file from the URL and compute the hash.
         folder : str or Path, optional
             The directory where the generated files/certs will be placed.
-        
+
         Returns
         -------
         str
@@ -780,15 +756,13 @@ class NodeCLI:
                 metadata_file = folder / "metadata_file_download.json"
                 self._download_file(pool_metadata_url, metadata_file)
                 result = self.run_cli(
-                    f"{self.cli} stake-pool metadata-hash "
-                    f"--pool-metadata-file {metadata_file}"
+                    f"{self.cli} stake-pool metadata-hash " f"--pool-metadata-file {metadata_file}"
                 )
                 pool_metadata_hash = result.stdout.strip()
 
             # Create the arg string for the pool cert.
             metadata_args = (
-                f"--metadata-url {pool_metadata_url} "
-                f"--metadata-hash {pool_metadata_hash}"
+                f"--metadata-url {pool_metadata_url} " f"--metadata-hash {pool_metadata_hash}"
             )
 
         # Create the relay arg string. Basically, we need a port and host arg
@@ -837,9 +811,7 @@ class NodeCLI:
         # Return the path to the generated pool cert
         return pool_cert_path
 
-    def generate_delegation_cert(
-        self, owner_stake_vkeys, pool_cold_vkey, folder=None
-    ):
+    def generate_delegation_cert(self, owner_stake_vkeys, pool_cold_vkey, folder=None):
         """Generate a delegation certificate for pledging.
 
         Parameters
@@ -866,9 +838,7 @@ class NodeCLI:
         certs = []
         for key_path in owner_stake_vkeys:
             key_path = Path(key_path)
-            cert_path = key_path.parent / (
-                key_path.stem + "_delegation_" + ts + ".cert"
-            )
+            cert_path = key_path.parent / (key_path.stem + "_delegation_" + ts + ".cert")
             self.run_cli(
                 f"{self.cli} stake-address delegation-certificate "
                 f"--stake-verification-key-file {key_path} "
@@ -970,7 +940,7 @@ class NodeCLI:
 
             # Build a transaction draft
             self.run_cli(
-                f"{self.cli} transaction build-raw {tx_in_str}"
+                f"{self.cli} transaction build-raw {self.era} {tx_in_str}"
                 f"--tx-out {payment_addr}+0 {pymt_args_zero} --ttl 0 --fee 0 "
                 f"--out-file {tx_draft_file} {cert_args}"
             )
@@ -1001,7 +971,7 @@ class NodeCLI:
                 raise NodeCLIError(
                     f"Transaction failed due to insufficient funds. Account "
                     f"{payment_addr} is empty."
-                )    
+                )
             raise NodeCLIError(
                 f"Transaction failed due to insufficient funds. Account "
                 f"{payment_addr} cannot pay transaction costs of {cost_ada} "
@@ -1028,8 +998,8 @@ class NodeCLI:
         # Build the transaction to the blockchain.
         tx_raw_file = Path(self.working_dir) / (tx_name + ".raw")
         self.run_cli(
-            f"{self.cli} transaction build-raw {tx_in_str} {utxo_str} "
-            f"{pymt_args} --ttl {ttl} --fee {min_fee} "
+            f"{self.cli} transaction build-raw {self.era} {tx_in_str} "
+            f"{utxo_str} {pymt_args} --ttl {ttl} --fee {min_fee} "
             f"--out-file {tx_raw_file} {cert_args}"
         )
 
@@ -1065,7 +1035,7 @@ class NodeCLI:
         required : int, optional
             Number of required signatures (used with type="atLeast")
         start_slot : int, optional
-            Lower bound on slots where minting is allowed 
+            Lower bound on slots where minting is allowed
         end_slot : int, optional
             Upper bound on slots where minting is allowed
 
@@ -1084,9 +1054,7 @@ class NodeCLI:
             folder.mkdir(parents=True, exist_ok=True)
 
         # Build the list of signature hashes
-        script = {
-            "scripts": [{"keyHash": h, "type": "sig"} for h in key_hashes]
-        }
+        script = {"scripts": [{"keyHash": h, "type": "sig"} for h in key_hashes]}
 
         # Determine the type. Default to all
         sig_type = sig_type.lower()
@@ -1155,7 +1123,7 @@ class NodeCLI:
             Path to the transaction file to be signed.
         skeys : list
             List of paths (str or Path) to the signing key files.
-        
+
         Returns
         -------
         str
@@ -1166,7 +1134,7 @@ class NodeCLI:
         signing_key_args = ""
         for key_path in skeys:
             signing_key_args += f"--signing-key-file {key_path} "
-        
+
         # Sign the transaction with the signing key
         tx_name = Path(tx_file).stem
         tx_signed_file = tx_name + ".signed"
@@ -1185,7 +1153,7 @@ class NodeCLI:
     def submit_transaction(self, signed_tx_file, cleanup=False) -> str:
         """Submit a transaction to the blockchain. This function is separate to
         enable the submissions of transactions signed by offline keys.
-        
+
         Parameters
         ----------
         signed_tx_file : str or Path
@@ -1193,7 +1161,7 @@ class NodeCLI:
         cleanup : bool, optional
             Flag that indicates if the temporary transaction files should be
             removed when finished (defaults to false).
-        
+
         Returns
         -------
         str
@@ -1202,17 +1170,14 @@ class NodeCLI:
 
         # Submit the transaction
         result = self.run_cli(
-            f"{self.cli} transaction submit "
-            f"--tx-file {signed_tx_file} {self.network}"
+            f"{self.cli} transaction submit " f"--tx-file {signed_tx_file} {self.network}"
         )
 
         if result.stderr:
             raise NodeCLIError(f"Unable to submit transaction: {result.stderr}")
 
         # Get the transaction ID
-        result = self.run_cli(
-            f"{self.cli} transaction txid --tx-file {signed_tx_file}"
-        )
+        result = self.run_cli(f"{self.cli} transaction txid --tx-file {signed_tx_file}")
         txid = result.stdout.strip()
 
         # Delete the transaction files if specified.
@@ -1327,9 +1292,7 @@ class NodeCLI:
         )
 
         # Generate delegation certificates (pledge from each owner)
-        del_certs = self.generate_delegation_cert(
-            owner_stake_vkeys, pool_cold_vkey, folder=folder
-        )
+        del_certs = self.generate_delegation_cert(owner_stake_vkeys, pool_cold_vkey, folder=folder)
         del_cert_args = ""
         for cert_path in del_certs:
             del_cert_args += f"--certificate-file {cert_path} "
@@ -1520,15 +1483,13 @@ class NodeCLI:
                 metadata_file = folder / "metadata_file_download.json"
                 self._download_file(pool_metadata_url, metadata_file)
                 result = self.run_cli(
-                    f"{self.cli} stake-pool metadata-hash "
-                    f"--pool-metadata-file {metadata_file}"
+                    f"{self.cli} stake-pool metadata-hash " f"--pool-metadata-file {metadata_file}"
                 )
                 pool_metadata_hash = result.stdout.strip()
 
             # Create the arg string for the pool cert.
             metadata_args = (
-                f"--metadata-url {pool_metadata_url} "
-                f"--metadata-hash {pool_metadata_hash}"
+                f"--metadata-url {pool_metadata_url} " f"--metadata-hash {pool_metadata_hash}"
             )
 
         # Create the relay arg string. Basically, we need a port and host arg
@@ -1768,9 +1729,7 @@ class NodeCLI:
             )
 
             # Calculate the minimum fee
-            min_fee = self.calc_min_fee(
-                tx_draft_file, utxo_count, tx_out_count=1, witness_count=2
-            )
+            min_fee = self.calc_min_fee(tx_draft_file, utxo_count, tx_out_count=1, witness_count=2)
 
             if utxo_total > min_fee:
                 break
@@ -1804,10 +1763,7 @@ class NodeCLI:
         )
 
         # Submit the transaction
-        self.run_cli(
-            f"{self.cli} transaction submit "
-            f"--tx-file {tx_signed_file} {self.network}"
-        )
+        self.run_cli(f"{self.cli} transaction submit " f"--tx-file {tx_signed_file} {self.network}")
 
         # Delete the transaction files if specified.
         if cleanup:
@@ -1828,9 +1784,7 @@ class NodeCLI:
         str
             The stake pool id.
         """
-        result = self.run_cli(
-            f"{self.cli} stake-pool id " f"--verification-key-file {cold_vkey}"
-        )
+        result = self.run_cli(f"{self.cli} stake-pool id " f"--verification-key-file {cold_vkey}")
         pool_id = result.stdout
         return pool_id
 
@@ -1846,7 +1800,7 @@ class NodeCLI:
     ):
         """Withdraw staking address rewards to a spending address.
 
-        Thanks to @ATADA_Stakepool who's scripts greatly influenced the 
+        Thanks to @ATADA_Stakepool who's scripts greatly influenced the
         development of this function. https://github.com/gitmachtl/scripts
 
         Parameters
@@ -1856,7 +1810,7 @@ class NodeCLI:
         stake_skey : str or Path
             Path to the staking address signing key.
         receive_addr : str
-            Spending address to receive the rewards. 
+            Spending address to receive the rewards.
         payment_skey : str or Path
             Path to the signing key for the account paying the tx fees.
         payment_addr : str, optional
@@ -1873,9 +1827,7 @@ class NodeCLI:
         # Calculate the amount to withdraw.
         rewards = self.get_rewards_balance(stake_addr)
         if rewards <= 0.0:
-            raise NodeCLIError(
-                f"No rewards availible in stake address {stake_addr}."
-            )
+            raise NodeCLIError(f"No rewards availible in stake address {stake_addr}.")
         withdrawal_str = f"{stake_addr}+{rewards}"
 
         # Get a list of UTXOs and sort them in decending order by value.
@@ -2081,11 +2033,10 @@ class NodeCLI:
         Returns
         ----------
         int
-            Rewards balance in lovelaces. 
+            Rewards balance in lovelaces.
         """
         result = self.run_cli(
-            f"{self.cli} query stake-address-info --address "
-            f"{stake_addr} {self.network}"
+            f"{self.cli} query stake-address-info --address " f"{stake_addr} {self.network}"
         )
         if "Failed" in result.stdout:
             raise NodeCLIError(result.stdout)
@@ -2095,9 +2046,7 @@ class NodeCLI:
         balance = sum(b["rewardAccountBalance"] for b in info)
         return balance
 
-    def empty_account(
-        self, to_addr, from_addr, key_file, offline=False, cleanup=True
-    ):
+    def empty_account(self, to_addr, from_addr, key_file, offline=False, cleanup=True):
         """Send all ADA contained in one address to another address.
 
         Parameters
@@ -2138,9 +2087,7 @@ class NodeCLI:
         )
 
         # Calculate the minimum fee
-        min_fee = self.calc_min_fee(
-            tx_draft_file, len(utxos), tx_out_count=2, witness_count=1
-        )
+        min_fee = self.calc_min_fee(tx_draft_file, len(utxos), tx_out_count=2, witness_count=1)
 
         if min_fee > bal:
             raise NodeCLIError(
@@ -2184,10 +2131,10 @@ class NodeCLI:
         Parameters
         ----------
         days : float
-            The number of days to convert to the number of slots. 
+            The number of days to convert to the number of slots.
         genesis_file : str or Path
             Path to the Shelley genesis file.
-        
+
         Returns
         -------
         int
@@ -2195,13 +2142,13 @@ class NodeCLI:
         """
 
         # Convert days to seconds.
-        dur_secs = days*24*60*60
+        dur_secs = days * 24 * 60 * 60
 
         # Get the info from the network genesis parameters.
         json_data = self._load_text_file(genesis_file)
         slot_dur_secs = json.loads(json_data)["slotLength"]
 
-        return int(dur_secs/slot_dur_secs)
+        return int(dur_secs / slot_dur_secs)
 
     def days2epochs(self, days, genesis_file) -> float:
         """Convert time in days to time in epochs.
@@ -2209,10 +2156,10 @@ class NodeCLI:
         Parameters
         ----------
         days : float
-            The number of days to convert to the number of epochs. 
+            The number of days to convert to the number of epochs.
         genesis_file : str or Path
             Path to the Shelley genesis file.
-        
+
         Returns
         -------
         float
@@ -2226,8 +2173,8 @@ class NodeCLI:
         json_data = self._load_text_file(genesis_file)
         epoch_dur_slots = json.loads(json_data)["epochLength"]
 
-        return float(dur_slots)/epoch_dur_slots
-    
+        return float(dur_slots) / epoch_dur_slots
+
     def generate_policy(self, script_path) -> str:
         """Generate a minting policy ID.
 
@@ -2243,10 +2190,7 @@ class NodeCLI:
         """
 
         # Submit the transaction
-        result = self.run_cli(
-            f"{self.cli} transaction policyid "
-            f" --script-file {script_path}"
-        )
+        result = self.run_cli(f"{self.cli} transaction policyid " f" --script-file {script_path}")
         return result.stdout
 
     def calc_min_utxo(self, assets) -> int:
@@ -2269,10 +2213,10 @@ class NodeCLI:
 
         # Use the globally defined function
         return utils.minimum_utxo(assets, self.protocol_parameters)
-    
+
     def _get_token_utxos(self, addr, policy_id, asset_names, quantities):
         """Get a list of UTxOs that contain the desired assets.
-        
+
         Parameters
         ----------
         addr : str
@@ -2365,7 +2309,7 @@ class NodeCLI:
         # Return the computed results as a tuple to be used for building a token
         # transaction.
         return (input_str, input_lovelace, output_tokens, return_tokens)
-    
+
     def build_send_tx(
         self,
         to_addr,
@@ -2425,9 +2369,7 @@ class NodeCLI:
         quantity = abs(quantity)
 
         # Convert asset name to hex
-        asset_name = "".join(
-            "{:02x}".format(c) for c in asset_name.encode("utf-8")
-        )
+        asset_name = "".join("{:02x}".format(c) for c in asset_name.encode("utf-8"))
 
         # Get the required UTxO(s) for the requested token.
         (
@@ -2435,9 +2377,7 @@ class NodeCLI:
             input_lovelace,
             output_tokens,
             return_tokens,
-        ) = self._get_token_utxos(
-            from_addr, policy_id, [asset_name], [quantity]
-        )
+        ) = self._get_token_utxos(from_addr, policy_id, [asset_name], [quantity])
 
         # Build token input and output strings
         output_token_utxo_str = ""
@@ -2485,8 +2425,7 @@ class NodeCLI:
                 output_str = f'--tx-out "{to_addr}+0{output_token_utxo_str}" '
             else:
                 output_str = (
-                    f'--tx-out "{to_addr}+0{output_token_utxo_str}" '
-                    f'--tx-out "{from_addr}+0" '
+                    f'--tx-out "{to_addr}+0{output_token_utxo_str}" ' f'--tx-out "{from_addr}+0" '
                 )
                 use_ada_utxo = True
         else:
@@ -2547,8 +2486,7 @@ class NodeCLI:
                 # If we do have enough to cover the needed output and fees, check
                 # if we need to add a second UTxO with the extra ADA.
                 if (
-                    input_lovelace - (min_fee + utxo_ret + utxo_out)
-                    > minMult * min_utxo
+                    input_lovelace - (min_fee + utxo_ret + utxo_out) > minMult * min_utxo
                     and output_str.count("--tx-out ") < 3
                 ):
 
@@ -2596,9 +2534,7 @@ class NodeCLI:
         # Build the transaction to send to the blockchain.
         token_return_utxo_str = ""
         if utxo_ret > 0:
-            token_return_utxo_str = (
-                f'--tx-out "{from_addr}+{utxo_ret}{return_token_utxo_str}"'
-            )
+            token_return_utxo_str = f'--tx-out "{from_addr}+{utxo_ret}{return_token_utxo_str}"'
         token_return_ada_str = ""
         if utxo_ret_ada > 0:
             token_return_ada_str = f"--tx-out {from_addr}+{utxo_ret_ada}"
@@ -2682,12 +2618,10 @@ class NodeCLI:
         else:
             folder = Path(folder)
             folder.mkdir(parents=True, exist_ok=True)
-        
+
         # Convert asset names to hex strings
         for n, name in enumerate(asset_names):
-            asset_names[n] = "".join(
-                "{:02x}".format(c) for c in name.encode("utf-8")
-            )
+            asset_names[n] = "".join("{:02x}".format(c) for c in name.encode("utf-8"))
 
         # Make sure all names are unique and the quantities match the names.
         # Giving a name is optional. So, if no names, one quantitiy value is
@@ -2900,9 +2834,7 @@ class NodeCLI:
 
         # Convert asset names to hex strings
         for n, name in enumerate(asset_names):
-            asset_names[n] = "".join(
-                "{:02x}".format(c) for c in name.encode("utf-8")
-            )
+            asset_names[n] = "".join("{:02x}".format(c) for c in name.encode("utf-8"))
 
         # Make sure all names are unique and the quantities match the names.
         # Giving a name is optional. So, if no names, one quantitiy value is
@@ -2927,9 +2859,7 @@ class NodeCLI:
             input_lovelace,
             output_tokens,
             return_tokens,
-        ) = self._get_token_utxos(
-            payment_addr, policy_id, asset_names, quantities
-        )
+        ) = self._get_token_utxos(payment_addr, policy_id, asset_names, quantities)
 
         # Determine the TTL
         tip = self.get_tip()
@@ -2952,7 +2882,7 @@ class NodeCLI:
         meta_str = ""
         if tx_metadata is not None:
             meta_str = f"--metadata-json-file {tx_metadata}"
-        
+
         # Create a minting script string
         script_str = f"--minting-script-file {minting_script}"
 
@@ -3037,7 +2967,6 @@ class NodeCLI:
 
         # Return the path to the raw transaction file.
         return tx_raw_file
-
 
 
 if __name__ == "__main__":
