@@ -37,9 +37,7 @@ def minimum_utxo(assets, params) -> int:
 
     # Get lists of unique policy IDs and asset names.
     unique_pids = list(set([asset.split(".")[0] for asset in assets]))
-    unique_names = list(
-        set([asset.split(".")[1] for asset in assets if len(asset.split(".")) > 1])
-    )
+    unique_names = list(set([asset.split(".")[1] for asset in assets if len(asset.split(".")) > 1]))
 
     # Get the number of unique policy IDs and token names in the bundle
     num_pids = len(unique_pids)
@@ -57,8 +55,7 @@ def minimum_utxo(assets, params) -> int:
     return max(
         [
             min_utxo,
-            (min_utxo // ada_only_utxo_size)
-            * (utxo_entry_size_without_val + size_bytes),
+            (min_utxo // ada_only_utxo_size) * (utxo_entry_size_without_val + size_bytes),
         ]
     )
 

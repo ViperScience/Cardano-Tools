@@ -135,9 +135,7 @@ class WalletHTTP:
         self.logger.debug(f"URL: {url}")
         r = requests.get(url)
         if r.status_code != 200:
-            self.logger.error(
-                f"Bad status code received: {r.status_code}, {r.text}"
-            )
+            self.logger.error(f"Bad status code received: {r.status_code}, {r.text}")
             return None
         payload = json.loads(r.text)
         self.logger.debug(r.text)
@@ -155,9 +153,7 @@ class WalletHTTP:
         self.logger.debug(f"URL: {url}")
         r = requests.get(url)
         if r.status_code != 200:
-            self.logger.error(
-                f"Bad status code received: {r.status_code}, {r.text}"
-            )
+            self.logger.error(f"Bad status code received: {r.status_code}, {r.text}")
             return None
         payload = json.loads(r.text)
         self.logger.debug(r.text)
@@ -175,9 +171,7 @@ class WalletHTTP:
         self.logger.debug(f"URL: {url}")
         r = requests.get(url)
         if r.status_code != 200:
-            self.logger.error(
-                f"Bad status code received: {r.status_code}, {r.text}"
-            )
+            self.logger.error(f"Bad status code received: {r.status_code}, {r.text}")
             return None
         payload = json.loads(r.text)
         self.logger.debug(r.text)
@@ -205,9 +199,7 @@ class WalletHTTP:
         self.logger.debug(f"URL: {url}")
         r = requests.get(url)
         if r.status_code != 200:
-            self.logger.error(
-                f"Bad status code received: {r.status_code}, {r.text}"
-            )
+            self.logger.error(f"Bad status code received: {r.status_code}, {r.text}")
             return None
         payload = json.loads(r.text)
         lovelace_balance = payload.get("balance").get("total")
@@ -220,9 +212,7 @@ class WalletHTTP:
         self.logger.debug(f"URL: {url}")
         r = requests.get(url)
         if r.status_code != 200:
-            self.logger.error(
-                f"Bad status code received: {r.status_code}, {r.text}"
-            )
+            self.logger.error(f"Bad status code received: {r.status_code}, {r.text}")
             return None
         payload = json.loads(r.text)
         addresses = [elem.get("id") for elem in payload]
@@ -235,9 +225,7 @@ class WalletHTTP:
         self.logger.debug(f"URL: {url}")
         r = requests.get(url)
         if not r.ok:
-            self.logger.error(
-                f"Bad status code received: {r.status_code}, {r.text}"
-            )
+            self.logger.error(f"Bad status code received: {r.status_code}, {r.text}")
             return None
         payload = json.loads(r.text)
         self.logger.debug(r.text)
@@ -254,12 +242,8 @@ class WalletHTTP:
             if tx_data.get("status") == "expired":
                 return False
             if time.time() - start_time > timeout:
-                raise WalletError(
-                    "Timeout waiting for transaction confirmation."
-                )
-            self.logger.info(
-                "Transaction not yet confirmed, pausing before next check..."
-            )
+                raise WalletError("Timeout waiting for transaction confirmation.")
+            self.logger.info("Transaction not yet confirmed, pausing before next check...")
             time.sleep(pause)
 
     def send_lovelace(
@@ -292,9 +276,7 @@ class WalletHTTP:
         )
         r = requests.post(url, json=tx_body, headers=headers)
         if not r.ok:
-            self.logger.error(
-                f"Bad status code received: {r.status_code}, {r.text}"
-            )
+            self.logger.error(f"Bad status code received: {r.status_code}, {r.text}")
             return None
         payload = json.loads(r.text)
         if wait:
@@ -312,9 +294,7 @@ class WalletHTTP:
         wait: bool = False,
     ):
         """Sends the specified amount of ADA to the provided address"""
-        return self.send_lovelace(
-            wallet_id, rx_address, quantity_ada * 1_000_000, passphrase, wait
-        )
+        return self.send_lovelace(wallet_id, rx_address, quantity_ada * 1_000_000, passphrase, wait)
 
     def send_tokens(
         self,
@@ -341,10 +321,7 @@ class WalletHTTP:
 
         # Make sure we send at least the minimum lovelace amount
         min_lovelace = minimum_utxo(
-            [
-                f"{asset.get('policy_id')}.{asset.get('asset_name')}"
-                for asset in assets
-            ],
+            [f"{asset.get('policy_id')}.{asset.get('asset_name')}" for asset in assets],
             {
                 "utxoCostPerWord": 34482,  # Const. from Alonzo genesis file
             },
@@ -374,9 +351,7 @@ class WalletHTTP:
         )
         r = requests.post(url, json=tx_body, headers=headers)
         if not r.ok:
-            self.logger.error(
-                f"Bad status code received: {r.status_code}, {r.text}"
-            )
+            self.logger.error(f"Bad status code received: {r.status_code}, {r.text}")
             return None
 
         payload = json.loads(r.text)
@@ -418,10 +393,7 @@ class WalletHTTP:
             assets = payment.get("assets")
             lovelace_amount = payment.get("amount").get("quantity")
             min_lovelace = minimum_utxo(
-                [
-                    f"{asset.get('policy_id')}.{asset.get('asset_name')}"
-                    for asset in assets
-                ],
+                [f"{asset.get('policy_id')}.{asset.get('asset_name')}" for asset in assets],
                 {
                     "utxoCostPerWord": 34482,  # Const. from Alonzo genesis file
                 },
@@ -443,9 +415,7 @@ class WalletHTTP:
         self.logger.debug(f"Sending batch of {len(payments)} payments...")
         r = requests.post(url, json=tx_body, headers=headers)
         if not r.ok:
-            self.logger.error(
-                f"ERROR: Bad status code received: {r.status_code}, {r.text}"
-            )
+            self.logger.error(f"ERROR: Bad status code received: {r.status_code}, {r.text}")
             return None
 
         payload = json.loads(r.text)
