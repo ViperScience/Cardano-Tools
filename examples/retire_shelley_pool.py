@@ -17,7 +17,6 @@ cold_skey = "/home/cardano/tools/pool_cold.skey"
 pmt_skey = "/home/cardano/relay-node/payment.skey"
 addr = "addr1..."
 
-cli = NodeCLI(path_to_cli, path_to_socket, working_dir, 
-    network="--testnet-magic 42")
+cli = NodeCLI(path_to_cli, path_to_socket, working_dir, network="--testnet-magic 42")
 
 cli.retire_stake_pool(10, genesis_json_file, cold_vkey, cold_skey, pmt_skey, addr)

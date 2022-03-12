@@ -5,30 +5,21 @@ import os
 
 if __name__ == "__main__":
 
-    cw_http = WalletHTTP(
-        wallet_server="http://127.0.0.1",
-        wallet_server_port=8090
-    )
+    cw_http = WalletHTTP(wallet_server="http://127.0.0.1", wallet_server_port=8090)
 
     logging.basicConfig(level=logging.DEBUG)
 
     pmts = [
         {
             "address": "addr1....",
-            "amount": {
-                "quantity": int(310.23*1_000_000),
-                "unit": "lovelace"
-            },
-            "assets": []
+            "amount": {"quantity": int(310.23 * 1_000_000), "unit": "lovelace"},
+            "assets": [],
         },
         {
             "address": "addr1....",
-            "amount": {
-                "quantity": int(212.34*1_000_000),
-                "unit": "lovelace"
-            },
-            "assets": []
-        }
+            "amount": {"quantity": int(212.34 * 1_000_000), "unit": "lovelace"},
+            "assets": [],
+        },
     ]
 
     wallet = cw_http.get_wallet_by_name("ExampleWallet")
@@ -40,11 +31,6 @@ if __name__ == "__main__":
     #     $ read "?Enter passphrase: " WALLET_PASSPHRASE
     #     $ export WALLET_PASSPHRASE
     #
-    passphrase = os.getenv('WALLET_PASSPHRASE')
+    passphrase = os.getenv("WALLET_PASSPHRASE")
 
-    cw_http.send_batch_tx(
-        wallet.get("id"),
-        pmts,
-        passphrase,
-        wait=True
-    )
+    cw_http.send_batch_tx(wallet.get("id"), pmts, passphrase, wait=True)

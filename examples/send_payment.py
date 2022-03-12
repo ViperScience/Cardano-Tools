@@ -17,10 +17,7 @@ from_addr = "addr_test1qrjpd..."
 amt_ada = 10
 
 cli = NodeCLI(
-    path_to_cli,
-    path_to_socket,
-    working_dir,
-    network="--testnet-magic 42"  # <-- for the testnet
+    path_to_cli, path_to_socket, working_dir, network="--testnet-magic 42"  # <-- for the testnet
 )
 
 # Send the payment

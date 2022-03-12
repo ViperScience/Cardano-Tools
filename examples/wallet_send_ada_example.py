@@ -5,10 +5,7 @@ import os
 
 if __name__ == "__main__":
 
-    cw_http = WalletHTTP(
-        wallet_server="http://127.0.0.1",
-        wallet_server_port=8090
-    )
+    cw_http = WalletHTTP(wallet_server="http://127.0.0.1", wallet_server_port=8090)
 
     logging.basicConfig(level=logging.DEBUG)
 
@@ -24,12 +21,6 @@ if __name__ == "__main__":
     #     $ read "?Enter password: " WALLET_PASS
     #     $ export WALLET_PASS
     #
-    passphrase = os.getenv('WALLET_PASSPHRASE')
+    passphrase = os.getenv("WALLET_PASSPHRASE")
 
-    cw_http.send_ada(
-        wallet.get("id"),
-        rx_address,
-        ada_amt,
-        passphrase,
-        wait=True
-    )
+    cw_http.send_ada(wallet.get("id"), rx_address, ada_amt, passphrase, wait=True)

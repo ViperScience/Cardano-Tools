@@ -19,7 +19,6 @@ path_to_socket = "/home/cardano/relay-node/node.socket"
 working_dir = "/home/cardano/.cardano-tools/"
 addr = "addr1..."
 
-cli = NodeCLI(path_to_cli, path_to_socket, working_dir, 
-    network="--testnet-magic 1097911063")
+cli = NodeCLI(path_to_cli, path_to_socket, working_dir, network="--testnet-magic 1097911063")
 
 print(json.dumps(cli.get_utxos(addr), indent=4, sort_keys=True))

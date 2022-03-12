@@ -5,9 +5,7 @@ import json
 
 if __name__ == "__main__":
 
-    cw_cli = WalletCLI(
-        path_to_cli="/usr/local/bin/cardano-wallet"
-    )
+    cw_cli = WalletCLI(path_to_cli="/usr/local/bin/cardano-wallet")
 
     logging.basicConfig(level=logging.DEBUG)
 

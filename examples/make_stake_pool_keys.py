@@ -8,7 +8,7 @@ cli = NodeCLI(
     "/usr/local/bin/cardano-cli",
     "/home/lovelace/cardano-node/node.socket",
     working_dir,
-    network="--testnet-magic 42"  # <-- for testnet only
+    network="--testnet-magic 42",  # <-- for testnet only
 )
 
 # Generate the pool keys.
