@@ -1,16 +1,10 @@
-#!/usr/bin/env python3
-# Cardano-Tools Example: Check wallet balance.
+from cardano_tools import WalletCLI
 import logging
-
-#### Use the dev version of the package ####
-import sys
-sys.path.append('../')
-from cardano_tools import WalletToolsCLI
 
 
 if __name__ == "__main__":
 
-    cw_cli = WalletToolsCLI(
+    cw_cli = WalletCLI(
         path_to_cli="/usr/local/bin/cardano-wallet"
     )
 

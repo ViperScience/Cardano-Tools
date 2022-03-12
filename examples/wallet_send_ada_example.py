@@ -1,17 +1,11 @@
-#!/usr/bin/env python3
-# Cardano-Tools Example: Check wallet balance.
+from cardano_tools import WalletHTTP
 import logging
 import os
-
-#### Use the dev version of the package ####
-import sys
-sys.path.append('../')
-from cardano_tools import WalletToolsHTTP
 
 
 if __name__ == "__main__":
 
-    cw_http = WalletToolsHTTP(
+    cw_http = WalletHTTP(
         wallet_server="http://127.0.0.1",
         wallet_server_port=8090
     )
@@ -27,8 +21,8 @@ if __name__ == "__main__":
     # Example ZSH shell command to save the password in a local variable
     # without it being stored in the command history:
     #
-    #     $ read "?Enter passphrase: " WALLET_PASSPHRASE
-    #     $ export WALLET_PASSPHRASE
+    #     $ read "?Enter password: " WALLET_PASS
+    #     $ export WALLET_PASS
     #
     passphrase = os.getenv('WALLET_PASSPHRASE')
 

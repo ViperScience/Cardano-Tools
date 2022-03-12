@@ -1,6 +1,11 @@
-import sys
-sys.path.append('../')
-from cardano_tools import ShelleyTools
+from cardano_tools import NodeCLI
+import logging
+
+# Setup logging (optional)
+logging.basicConfig(
+    level=logging.DEBUG,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+)
 
 # Test Inputs
 path_to_cli = "/usr/local/bin/cardano-cli"
@@ -11,14 +16,12 @@ to_addr = "addr_test1qpzft..."
 from_addr = "addr_test1qrjpd..."
 amt_ada = 10
 
-# Create a ShelleyTools object
-shelley = ShelleyTools(
+cli = NodeCLI(
     path_to_cli,
     path_to_socket,
     working_dir,
     network="--testnet-magic 42"  # <-- for the testnet
 )
-shelley.debug = True  # <-- print debug info
 
 # Send the payment
-shelley.send_payment(amt_ada, to_addr, from_addr, key_file)
+cli.send_payment(amt_ada, to_addr, from_addr, key_file)

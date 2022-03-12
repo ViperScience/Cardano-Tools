@@ -1,18 +1,14 @@
-import sys
-sys.path.append('../')
-from cardano_tools import ShelleyTools
-import json
+from cardano_tools import NodeCLI
 
 # Test Inputs
 path_to_cli = "/home/cardano/.cabal/bin/cardano-cli"
-path_to_socket = "/home/cardano/relay-node/db/node.socket"
+path_to_socket = "/home/cardano/relay-node/node.socket"
 working_dir = "/home/cardano/.cardano-tools/"
-addr = ""
+addr = "test_addr1..."
 
-# Create a ShelleyTools object
-shelley = ShelleyTools(path_to_cli, path_to_socket, working_dir, 
+cli = NodeCLI(path_to_cli, path_to_socket, working_dir, 
     network="--testnet-magic 42")
 
 # Create the new address and all the required key files. Optionally specify a
 # location for the files other than the object's working directory.
-print(shelley.make_address("test_addr_name"))
+print(cli.make_address("test_addr_name"))

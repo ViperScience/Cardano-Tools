@@ -1,12 +1,16 @@
-
-import sys
-sys.path.append('../')
-from cardano_tools import ShelleyTools
+from cardano_tools import NodeCLI
 from pathlib import Path
+import logging
+
+# Setup logging
+logging.basicConfig(
+    level=logging.DEBUG,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+)
 
 # Stakepool registration inputs
 working_dir = Path("/home/cardano/.cardano-tools/")
-pool_addr = "0068b77b4b0326470ccb61d..."
+pmt_addr = "addr1..."
 args = {
     "pool_name": "TICKER",
     "pool_pledge": 100_000*1_000_000,
@@ -23,8 +27,8 @@ args = {
     "owner_stake_skeys": [
         working_dir / "owner1_acct_stake.skey",
         working_dir / "owner2_acct_stake.skey",
-    ], 
-    "payment_addr": pool_addr, 
+    ],
+    "payment_addr": pmt_addr, 
     "payment_skey": working_dir / "pool_acct.skey", 
     "genesis_file": "/home/cardano/relay-node/genesis.json",
     "pool_relays": [
@@ -43,8 +47,7 @@ args = {
     "folder": working_dir
 }
 
-# Create a ShelleyTools object
-shelley = ShelleyTools(
+cli = NodeCLI(
     "/home/cardano/.cabal/bin/cardano-cli", 
     "/home/cardano/relay-node/db/node.socket", 
     "/home/cardano/.cardano-tools/",
@@ -52,4 +55,7 @@ shelley = ShelleyTools(
 )
 
 # Resister the stakepool on the blockchain
-shelley.register_stake_pool(**args)
+cli.register_stake_pool(**args)
+# NOTE this is not the recommended method since it requires access to cold keys
+# on a network connected machine. Use the pool registration transaction builder
+# instead.

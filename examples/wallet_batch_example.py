@@ -1,17 +1,11 @@
-#!/usr/bin/env python3
-# Cardano-Tools Example: Check wallet balance.
+from cardano_tools import WalletHTTP
 import logging
 import os
-
-#### Using the dev version of the package ####
-import sys
-sys.path.append('../')
-from cardano_tools import WalletToolsHTTP
 
 
 if __name__ == "__main__":
 
-    cw_http = WalletToolsHTTP(
+    cw_http = WalletHTTP(
         wallet_server="http://127.0.0.1",
         wallet_server_port=8090
     )

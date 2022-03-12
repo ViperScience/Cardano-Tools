@@ -1,18 +1,25 @@
-import sys
-sys.path.append('../')
-from cardano_tools import ShelleyTools
+from cardano_tools import NodeCLI
+import logging
 import json
+import sys
+
+# Setup logging
+logging.basicConfig(
+    level=logging.DEBUG,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    handlers=[
+        logging.FileHandler("cardano-tools-tests.log"),
+        logging.StreamHandler(sys.stdout),
+    ],
+)
 
 # Test Inputs
 path_to_cli = "/home/cardano/.cabal/bin/cardano-cli"
-path_to_socket = "/home/cardano/relay-node/db/node.socket"
+path_to_socket = "/home/cardano/relay-node/node.socket"
 working_dir = "/home/cardano/.cardano-tools/"
-addr = ""
+addr = "addr1..."
 
-# Create a ShelleyTools object
-shelley = ShelleyTools(path_to_cli, path_to_socket, working_dir, 
+cli = NodeCLI(path_to_cli, path_to_socket, working_dir, 
     network="--testnet-magic 1097911063")
 
-# Run tests
-print(shelley.cli)
-print(json.dumps(shelley.get_utxos(addr), indent=4, sort_keys=True))
+print(json.dumps(cli.get_utxos(addr), indent=4, sort_keys=True))
