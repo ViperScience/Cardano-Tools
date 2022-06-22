@@ -29,6 +29,7 @@ def test_bech32_decode(test_vectors):
     hex_data = "".join(format(x, "02x") for x in payload)
     assert hex_data == test_vectors[1]
 
+
 def test_bad_bech32(bad_test_vectors):
     assert (None, None) == utils.bech32_decode(bad_test_vectors[0])
     assert (None, None) == utils.bech32_decode(bad_test_vectors[1])
