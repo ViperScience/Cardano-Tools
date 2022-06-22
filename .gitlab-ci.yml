@@ -22,4 +22,4 @@ before_script:
 
 test:
   script:
-    - poetry run pytest tests
+    - poetry run pytest --cov=. --cov-report term-missing
