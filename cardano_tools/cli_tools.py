@@ -61,7 +61,7 @@ class NodeCLI:
     def check_node_version(self):
         res = self.run_cli(f"{self.cli} --version")
         if res.stdout.split(" ")[1] != LATEST_SUPPORTED_NODE_VERSION:
-            self.logger.warn(f"Unsupported cardano-node version.")
+            self.logger.warning(f"Unsupported cardano-node version.")
 
     def run_cli(self, cmd):
         os.environ["CARDANO_NODE_SOCKET_PATH"] = self.socket
@@ -132,14 +132,14 @@ class NodeCLI:
         """Query the node for the current epoch."""
         vals = self.cli_tip_query()
         if float(vals["syncProgress"]) != 100.0:
-            self.logger.warn("Node not fully synced!")
+            self.logger.warning("Node not fully synced!")
         return vals["epoch"]
 
     def get_tip(self) -> int:
         """Query the node for the current tip of the blockchain."""
         vals = self.cli_tip_query()
         if float(vals["syncProgress"]) != 100.0:
-            self.logger.warn("Node not fully synced!")
+            self.logger.warning("Node not fully synced!")
         return vals["slot"]
 
     def make_address(self, name, folder=None) -> str:
