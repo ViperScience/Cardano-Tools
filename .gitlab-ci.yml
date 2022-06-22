@@ -21,5 +21,7 @@ before_script:
   - poetry install
 
 test:
+  tags:
+    - cardano-node # cardano-node required to be setup on runner
   script:
     - poetry run pytest --cov=. --cov-report term-missing
