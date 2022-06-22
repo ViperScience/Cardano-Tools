@@ -94,9 +94,10 @@ class NodeCLI:
         """Load the protocol parameters which are needed for creating
         transactions.
         """
-        params_file = self.working_dir / "protocol.json"
+        params_file = os.path.join(self.working_dir, "protocol.json")
         self.run_cli(
-            f"{self.cli} query protocol-parameters {self.network} " f"--out-file {params_file}"
+            f"{self.cli} query protocol-parameters {self.network} "
+            f"--out-file {repr(params_file)}"
         )
         json_data = self._load_text_file(params_file)
         self.protocol_parameters = json.loads(json_data)
