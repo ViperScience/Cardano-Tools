@@ -314,6 +314,18 @@ The modules include detailed logging for debugging. To enable most log messages,
 
 The [example scripts](https://gitlab.com/viper-staking/cardano-tools/-/tree/master/examples) illustrate how to enable logging.
 
+## Contributing
+
+This repository uses [Poetry](https://python-poetry.org/) as the build system. To get started, clone the repository and install the dependencies.
+
+    git clone https://gitlab.com/viper-staking/cardano-tools.git
+    cd cardano-tools
+    poetry install
+
+To run the unit tests with coverage reports use the following:
+
+    poetry run pytest --cov=cardano_tools/ --cov-report term-missing
+
 ## Contributors
 
 This project is developed and maintained by the team at [Viper Staking](https://viperstaking.com/).
