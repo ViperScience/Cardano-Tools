@@ -128,12 +128,31 @@ class NodeCLI:
         vals = json.loads(result.stdout)
         return vals
 
+    def get_sync_progress(self) -> float:
+        """Query the node for the sync progress."""
+        vals = self.cli_tip_query()
+        return float(vals["syncProgress"])
+
     def get_epoch(self) -> int:
         """Query the node for the current epoch."""
         vals = self.cli_tip_query()
         if float(vals["syncProgress"]) != 100.0:
             self.logger.warning("Node not fully synced!")
         return vals["epoch"]
+
+    def get_slot(self) -> int:
+        """Query the node for the current slot."""
+        vals = self.cli_tip_query()
+        if float(vals["syncProgress"]) != 100.0:
+            self.logger.warning("Node not fully synced!")
+        return vals["slot"]
+
+    def get_era(self) -> int:
+        """Query the node for the current era."""
+        vals = self.cli_tip_query()
+        if float(vals["syncProgress"]) != 100.0:
+            self.logger.warning("Node not fully synced!")
+        return vals["era"]
 
     def get_tip(self) -> int:
         """Query the node for the current tip of the blockchain."""
