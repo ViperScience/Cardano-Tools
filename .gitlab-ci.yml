@@ -20,8 +20,16 @@ before_script:
   - pip install poetry
   - poetry install
 
-test:
+test-windows:
   tags:
     - cardano-node # cardano-node required to be setup on runner
+    - windows
+  script:
+    - poetry run pytest --cov=. --cov-report term-missing
+
+test-linux:
+  tags:
+    - cardano-node # cardano-node required to be setup on runner
+    - linux 
   script:
     - poetry run pytest --cov=. --cov-report term-missing
