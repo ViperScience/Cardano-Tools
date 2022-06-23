@@ -16,6 +16,7 @@ cache:
     - venv/
 
 before_script:
+  - source /home/gitlab-runner/.bashrc
   - python --version  # For debugging
   - env # For debugging
   - pip install poetry
