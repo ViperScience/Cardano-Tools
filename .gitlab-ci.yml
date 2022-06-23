@@ -17,6 +17,7 @@ cache:
 
 before_script:
   - python --version  # For debugging
+  - env # For debugging
   - pip install poetry
   - poetry install
 
