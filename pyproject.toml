@@ -8,7 +8,7 @@ license = "Apache-2.0"
 readme = "README.md"
 
 [tool.poetry.dependencies]
-python = "^3.9"
+python = "^3.8"
 requests = "^2.28.0"
 
 [tool.poetry.dev-dependencies]
@@ -22,4 +22,4 @@ build-backend = "poetry.core.masonry.api"
 
 [tool.black]
 line-length = 100
-target-version = [ "py39",]
+target-version = [ "py38",]
