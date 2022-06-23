@@ -14,7 +14,7 @@ cache:
     - venv/
 
 before_script:
-  - if [ "$SHELL" = "/bin/bash" ]; then
+  - if [ "$SHELL" == "/bin/bash" ]; then
       source /home/gitlab-runner/.bashrc
     fi
   - python --version  # For debugging
