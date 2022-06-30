@@ -252,10 +252,8 @@ Sending an NFT is also covered.
     skey1 = "payment.skey"
     signed_tx = cli.sign_transaction(tx_file, [skey1])
 
-# Send the transaction
-if click.confirm("Do you want to send?", abort=True):
+    # Send the transaction
     txid = cli.submit_transaction(signed_tx)
-    logging.info(f"Send transaction: {txid}")
 
 ### The Cardano Wallet
 The Cardano-Tools library contains an interface to the [Cardano wallet back end](https://github.com/input-output-hk/cardano-wallet), which may be accessed via either the CLI or through HTTP requests.
