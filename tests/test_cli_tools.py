@@ -13,12 +13,19 @@ def era():
 @pytest.fixture
 def cli_node(era):
     working_dir = os.getcwd()
+    # Override network with env var if it is set
+    if network := os.getenv("CARDANO_NETWORK"):
+        print(f"Using CARDANO_NETWORK env var for cardano-node: {network}")
+    else:
+        network = "--mainnet"
+        print("CARDANO_NETWORK env var not set, defaulting to --mainnet")
+
     yield cli_tools.NodeCLI(
         binary_path=os.path.abspath(os.getenv("CARDANO_NODE_CLI_PATH")).replace("\\", "/"),
         socket_path=os.path.abspath(os.getenv("CARDANO_NODE_SOCKET_PATH")).replace("\\", "/"),
         working_dir=working_dir,
         ttl_buffer=1000,
-        network="--mainnet",
+        network=network,
         era=f"--{era}-era",
     )
 
