@@ -6,20 +6,30 @@ from cardano_tools import cli_tools
 
 
 @pytest.fixture
-def era():
+def era() -> str:
     return "alonzo"
 
 
 @pytest.fixture
-def cli_node(era):
-    working_dir = os.getcwd()
+def network() -> str:
     # Override network with env var if it is set
     if network := os.getenv("CARDANO_NETWORK"):
         print(f"Using CARDANO_NETWORK env var for cardano-node: {network}")
     else:
         network = "--mainnet"
         print("CARDANO_NETWORK env var not set, defaulting to --mainnet")
+    return network
 
+
+@pytest.fixture
+def is_testnet(network) -> bool:
+    """Returns True if cardano-node is running on the testnet rather than mainnet"""
+    return "testnet" in network
+
+
+@pytest.fixture
+def cli_node(era, network):
+    working_dir = os.getcwd()
     yield cli_tools.NodeCLI(
         binary_path=os.path.abspath(os.getenv("CARDANO_NODE_CLI_PATH")).replace("\\", "/"),
         socket_path=os.path.abspath(os.getenv("CARDANO_NODE_SOCKET_PATH")).replace("\\", "/"),
