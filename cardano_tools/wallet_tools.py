@@ -4,6 +4,7 @@ import subprocess
 import requests
 import logging
 import shlex
+import pexpect
 import json
 import time
 
@@ -44,6 +45,34 @@ class WalletCLI:
         """Generate a recovery or seed phrase (mnemonic)."""
         result = self.run_cli(f"recovery-phrase generate --size={size}")
         return result.stdout
+
+    def create_wallet(
+        self,
+        name: str,
+        recovery_phrase: str,
+        passphrase: str,
+        secondary_phrase: str = " ",
+        address_pool_gap: int = 20,
+    ):
+        """Creates a new wallet with the provided recovery phrase and optional secondary phrase"""
+        self.logger.debug(f"Running create wallet command...")
+        child = pexpect.spawn(
+            f"{self.cli} wallet create from-recovery-phrase {name} --address-pool-gap {address_pool_gap}",
+            timeout=2,
+        )
+        try:
+            child.expect("Please enter the .* recovery phrase:")
+            child.sendline(recovery_phrase)
+            child.expect("Please enter a .* word second factor:")
+            child.sendline(secondary_phrase)
+            child.expect("Please enter a passphrase:")
+            child.sendline(passphrase)
+            child.expect("Enter the passphrase a second time:")
+            child.sendline(passphrase)
+            child.expect("Ok.")
+            self.logger.debug(f"Create wallet result: {child.after}")
+        except:
+            self.logger.error(f"Error creating wallet: {child}")
 
     def get_all_wallets(self):
         """Get a list of all created wallets known to the wallet service.
