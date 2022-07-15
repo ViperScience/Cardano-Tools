@@ -74,6 +74,23 @@ class WalletCLI:
         except:
             self.logger.error(f"Error creating wallet: {child}")
 
+    def create_wallet_from_key(
+        self,
+        name: str,
+        xpub_key: str,
+        address_pool_gap: int = 20,
+    ) -> dict:
+        """Creates a new wallet with the provided account extended public key (public key + chain code)"""
+        self.logger.debug(f"Running create wallet command...")
+        res = self.run_cli(
+            f"wallet create from-public-key {name} --address-pool-gap {address_pool_gap} {xpub_key}"
+        )
+        if len(res.stdout) > 0:
+            wallet = json.loads(res.stdout)
+            return wallet
+        else:
+            return {}
+
     def get_all_wallets(self) -> dict:
         """Get a list of all created wallets known to the wallet service.
 
@@ -86,7 +103,9 @@ class WalletCLI:
         res = self.run_cli("wallet list")
         if len(res.stdout) > 0:
             wallet_list = json.loads(res.stdout)
-        return wallet_list
+            return wallet_list
+        else:
+            return {}
 
     def get_wallet(self, wallet_id: str) -> dict:
         """Find the wallet specified by the ID.
@@ -187,10 +206,35 @@ class WalletHTTP:
         }
         tx_body = {
             "name": name,
-            "passphrase": passphrase,
             "mnemonic_sentence": recovery_phrase,
             "mnemonic_second_factor": secondary_phrase,
             "passphrase": passphrase,
+            "address_pool_gap": address_pool_gap,
+        }
+        r = requests.post(url, json=tx_body, headers=headers)
+        if not r.ok:
+            self.logger.error(f"Bad status code received: {r.status_code}, {r.text}")
+            return {}
+        payload = json.loads(r.text)
+        self.logger.debug(r.text)
+        return payload
+
+    def create_wallet_from_key(
+        self,
+        name: str,
+        xpub_key: list[str],
+        address_pool_gap: int = 20,
+    ):
+        """Creates/restores wallet from an extended public key (account public key + chain code)"""
+        url = f"{self.wallet_url}v2/wallets"
+        self.logger.debug(f"URL: {url}")
+        headers = {
+            "Content-type": "application/json",
+            "Accept": "application/json",
+        }
+        tx_body = {
+            "name": name,
+            "account_public_key": xpub_key,
             "address_pool_gap": address_pool_gap,
         }
         r = requests.post(url, json=tx_body, headers=headers)
