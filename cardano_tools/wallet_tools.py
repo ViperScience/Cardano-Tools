@@ -28,7 +28,7 @@ class WalletCLI:
         self.port = port
         self.logger = logging.getLogger(__name__)
 
-    def run_cli(self, cmd):
+    def run_cli(self, cmd) -> tuple:
         # Execute the commands locally
         # For network instances use the HTTP class.
         cmd = f"{self.cli} {cmd}"
@@ -53,17 +53,17 @@ class WalletCLI:
         passphrase: str,
         secondary_phrase: str = " ",
         address_pool_gap: int = 20,
-    ):
+    ) -> None:
         """Creates a new wallet with the provided recovery phrase and optional secondary phrase"""
         self.logger.debug(f"Running create wallet command...")
         child = pexpect.spawn(
-            f"{self.cli} wallet create from-recovery-phrase {name} --address-pool-gap {address_pool_gap}",
+            f"{self.cli} wallet create from-recovery-phrase {name} --port {self.port} --address-pool-gap {address_pool_gap}",
             timeout=2,
         )
         try:
             child.expect("Please enter the .* recovery phrase:")
             child.sendline(recovery_phrase)
-            child.expect("Please enter a .* word second factor:")
+            child.expect("Please enter a .* second factor:")
             child.sendline(secondary_phrase)
             child.expect("Please enter a passphrase:")
             child.sendline(passphrase)
@@ -74,7 +74,7 @@ class WalletCLI:
         except:
             self.logger.error(f"Error creating wallet: {child}")
 
-    def get_all_wallets(self):
+    def get_all_wallets(self) -> dict:
         """Get a list of all created wallets known to the wallet service.
 
         Returns
@@ -88,7 +88,7 @@ class WalletCLI:
             wallet_list = json.loads(res.stdout)
         return wallet_list
 
-    def get_wallet(self, wallet_id: str):
+    def get_wallet(self, wallet_id: str) -> dict:
         """Find the wallet specified by the ID.
 
         Parameters
@@ -100,9 +100,9 @@ class WalletCLI:
         res = self.run_cli(f"wallet get --port={self.port} {wallet_id}")
         if "ok" in res.stderr.lower():
             return json.loads(res.stdout)
-        return None
+        return {}
 
-    def get_wallet_by_name(self, name: str) -> str:
+    def get_wallet_by_name(self, name: str) -> dict:
         """Find the wallet from the supplied name (case insensitive).
 
         Parameters
@@ -116,9 +116,9 @@ class WalletCLI:
         for wallet in all_wallets:
             if wallet.get("name").lower() == name.lower():
                 return wallet
-        return None
+        return {}
 
-    def delete_wallet(self, wallet_id: str):
+    def delete_wallet(self, wallet_id: str) -> None:
         """Delete a wallet from cardano-wallet data by ID.
 
         Parameters
@@ -135,7 +135,7 @@ class WalletCLI:
         if len(res.stderr) > 3:  # stderr is "Ok." on success
             raise WalletError(res.stderr)
 
-    def get_wallet_balance(self, wallet_id: str) -> float:
+    def get_balance(self, wallet_id: str) -> float:
         """Get the wallet balance in ADA.
 
         Parameters
@@ -148,29 +148,30 @@ class WalletCLI:
         float
             The total wallet balance (including rewards) in ADA.
         """
+        # TODO: Add asset balance
         wallet = self.get_wallet(wallet_id)
         bal = float(wallet.get("balance").get("total").get("quantity"))
         return bal / 1_000_000  # Return the value in units of ADA
 
 
 class WalletHTTP:
-    def __init__(self, wallet_server, wallet_server_port):
+    def __init__(self, wallet_server: str = "http://localhost", wallet_server_port: int = 8090):
         self.wallet_url = f"{wallet_server}:{wallet_server_port}/"
         self.logger = logging.getLogger(__name__)
 
-    def get_network_params(self):
+    def get_network_params(self) -> dict:
         """Returns the set of network parameters for the current epoch."""
         url = f"{self.wallet_url}v2/network/parameters"
         self.logger.debug(f"URL: {url}")
         r = requests.get(url)
         if r.status_code != 200:
             self.logger.error(f"Bad status code received: {r.status_code}, {r.text}")
-            return None
+            return {}
         payload = json.loads(r.text)
         self.logger.debug(r.text)
         return payload
 
-    def get_all_wallets(self):
+    def get_all_wallets(self) -> dict:
         """Get a list of all created wallets known to the wallet service.
 
         Returns
@@ -183,12 +184,12 @@ class WalletHTTP:
         r = requests.get(url)
         if r.status_code != 200:
             self.logger.error(f"Bad status code received: {r.status_code}, {r.text}")
-            return None
+            return {}
         payload = json.loads(r.text)
         self.logger.debug(r.text)
         return payload
 
-    def get_wallet(self, wallet_id: str):
+    def get_wallet(self, wallet_id: str) -> dict:
         """Find the wallet specified by the ID.
 
         Parameters
@@ -201,12 +202,12 @@ class WalletHTTP:
         r = requests.get(url)
         if r.status_code != 200:
             self.logger.error(f"Bad status code received: {r.status_code}, {r.text}")
-            return None
+            return {}
         payload = json.loads(r.text)
         self.logger.debug(r.text)
         return payload
 
-    def get_wallet_by_name(self, name: str):
+    def get_wallet_by_name(self, name: str) -> dict:
         """Find the wallet from the supplied name (case insensitive).
 
         Parameters
@@ -220,34 +221,34 @@ class WalletHTTP:
         for wallet in all_wallets:
             if wallet.get("name").lower() == name.lower():
                 return wallet
-        return None
+        return {}
 
-    def get_balance(self, wallet_id: str):
+    def get_balance(self, wallet_id: str) -> tuple:
         """Get balances of wallet"""
         url = f"{self.wallet_url}v2/wallets/{wallet_id}"
         self.logger.debug(f"URL: {url}")
         r = requests.get(url)
         if r.status_code != 200:
             self.logger.error(f"Bad status code received: {r.status_code}, {r.text}")
-            return None
+            return ()
         payload = json.loads(r.text)
         lovelace_balance = payload.get("balance").get("total")
         asset_balances = payload.get("assets").get("total")
         return lovelace_balance, asset_balances
 
-    def get_addresses(self, wallet_id: str):
+    def get_addresses(self, wallet_id: str) -> list:
         """Returns a list of addresses tracked by the provided wallet"""
         url = f"{self.wallet_url}v2/wallets/{wallet_id}/addresses"
         self.logger.debug(f"URL: {url}")
         r = requests.get(url)
         if r.status_code != 200:
             self.logger.error(f"Bad status code received: {r.status_code}, {r.text}")
-            return None
+            return []
         payload = json.loads(r.text)
         addresses = [elem.get("id") for elem in payload]
         return addresses
 
-    def get_transacton(self, wallet_id: str, tx_id: str):
+    def get_transacton(self, wallet_id: str, tx_id: str) -> dict:
         """Pull information about the specified transaction."""
         self.logger.info(f"Querying information for transaction {tx_id}")
         url = f"{self.wallet_url}v2/wallets/{wallet_id}/transactions/{tx_id}"
@@ -255,12 +256,14 @@ class WalletHTTP:
         r = requests.get(url)
         if not r.ok:
             self.logger.error(f"Bad status code received: {r.status_code}, {r.text}")
-            return None
+            return {}
         payload = json.loads(r.text)
         self.logger.debug(r.text)
         return payload
 
-    def confirm_tx(self, wallet_id: str, tx_id: str, timeout: float = 600, pause: float = 5):
+    def confirm_tx(
+        self, wallet_id: str, tx_id: str, timeout: float = 600, pause: float = 5
+    ) -> bool:
         """Checks the given transaction and waits until it's submitted."""
         start_time = time.time()
         while True:
@@ -282,7 +285,7 @@ class WalletHTTP:
         quantity: int,
         passphrase: str,
         wait: bool = False,
-    ):
+    ) -> dict:
         """Sends the specified amount of lovelace to the provided address"""
         url = f"{self.wallet_url}v2/wallets/{wallet_id}/transactions"
         self.logger.debug(f"URL: {url}")
@@ -306,7 +309,7 @@ class WalletHTTP:
         r = requests.post(url, json=tx_body, headers=headers)
         if not r.ok:
             self.logger.error(f"Bad status code received: {r.status_code}, {r.text}")
-            return None
+            return {}
         payload = json.loads(r.text)
         if wait:
             tx_id = payload.get("id")
@@ -321,7 +324,7 @@ class WalletHTTP:
         quantity_ada: int,
         passphrase: str,
         wait: bool = False,
-    ):
+    ) -> dict:
         """Sends the specified amount of ADA to the provided address"""
         return self.send_lovelace(wallet_id, rx_address, quantity_ada * 1_000_000, passphrase, wait)
 
@@ -333,7 +336,7 @@ class WalletHTTP:
         passphrase: str,
         lovelace_amount: int = 0,
         wait: bool = False,
-    ):
+    ) -> dict:
         """Sends the specified amount of tokens to the provided address
 
         assets is a list of dicts comprised of the following:
@@ -381,7 +384,7 @@ class WalletHTTP:
         r = requests.post(url, json=tx_body, headers=headers)
         if not r.ok:
             self.logger.error(f"Bad status code received: {r.status_code}, {r.text}")
-            return None
+            return {}
 
         payload = json.loads(r.text)
         self.logger.debug(f"Tokens sent! Payload {payload}")
@@ -397,7 +400,7 @@ class WalletHTTP:
         payments: list,
         passphrase: str,
         wait: bool = False,
-    ):
+    ) -> dict:
         """Sends a batch of transactions. Takes in a list of payments dicts of the following format:
         [
             {
@@ -445,7 +448,7 @@ class WalletHTTP:
         r = requests.post(url, json=tx_body, headers=headers)
         if not r.ok:
             self.logger.error(f"ERROR: Bad status code received: {r.status_code}, {r.text}")
-            return None
+            return {}
 
         payload = json.loads(r.text)
         self.logger.debug(f"Tokens sent! Payload {payload}")
