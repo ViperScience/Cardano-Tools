@@ -6,16 +6,6 @@ from cardano_tools import cli_tools
 
 
 @pytest.fixture
-def mainnet_era() -> str:
-    return "alonzo"
-
-
-@pytest.fixture
-def testnet_era() -> str:
-    return "babbage"
-
-
-@pytest.fixture
 def network() -> str:
     # Override network with env var if it is set
     if network := os.getenv("CARDANO_NETWORK"):
@@ -33,7 +23,12 @@ def is_testnet(network) -> bool:
 
 
 @pytest.fixture
-def cli_node(network, mainnet_era, testnet_era, is_testnet):
+def era(is_testnet) -> str:
+    return "babbage" if is_testnet else "alonzo"
+
+
+@pytest.fixture
+def cli_node(network, era):
     working_dir = os.getcwd()
     yield cli_tools.NodeCLI(
         binary_path=os.path.abspath(os.getenv("CARDANO_NODE_CLI_PATH")).replace("\\", "/"),
@@ -41,7 +36,7 @@ def cli_node(network, mainnet_era, testnet_era, is_testnet):
         working_dir=working_dir,
         ttl_buffer=1000,
         network=network,
-        era=f"--{testnet_era if is_testnet else mainnet_era}-era",
+        era=f"--{era}-era",
     )
 
     # After test, remove temporary test files
