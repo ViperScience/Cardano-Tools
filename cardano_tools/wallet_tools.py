@@ -164,12 +164,49 @@ class WalletHTTP:
         url = f"{self.wallet_url}v2/network/parameters"
         self.logger.debug(f"URL: {url}")
         r = requests.get(url)
-        if r.status_code != 200:
+        if not r.ok:
             self.logger.error(f"Bad status code received: {r.status_code}, {r.text}")
             return {}
         payload = json.loads(r.text)
         self.logger.debug(r.text)
         return payload
+
+    def create_wallet(
+        self,
+        name: str,
+        recovery_phrase: list[str],
+        passphrase: str,
+        secondary_phrase: list[str] = None,
+        address_pool_gap: int = 20,
+    ):
+        url = f"{self.wallet_url}v2/wallets"
+        self.logger.debug(f"URL: {url}")
+        headers = {
+            "Content-type": "application/json",
+            "Accept": "application/json",
+        }
+        tx_body = {
+            "name": name,
+            "passphrase": passphrase,
+            "mnemonic_sentence": recovery_phrase,
+            "mnemonic_second_factor": secondary_phrase,
+            "passphrase": passphrase,
+            "address_pool_gap": address_pool_gap,
+        }
+        r = requests.post(url, json=tx_body, headers=headers)
+        if not r.ok:
+            self.logger.error(f"Bad status code received: {r.status_code}, {r.text}")
+            return {}
+        payload = json.loads(r.text)
+        self.logger.debug(r.text)
+        return payload
+
+    def delete_wallet(self, wallet_id: str) -> None:
+        url = f"{self.wallet_url}v2/wallets/{wallet_id}"
+        self.logger.debug(f"URL: {url}")
+        r = requests.delete(url)
+        if not r.ok:
+            self.logger.error(f"Bad status code received: {r.status_code}, {r.text}")
 
     def get_all_wallets(self) -> dict:
         """Get a list of all created wallets known to the wallet service.
@@ -182,7 +219,7 @@ class WalletHTTP:
         url = f"{self.wallet_url}v2/wallets"
         self.logger.debug(f"URL: {url}")
         r = requests.get(url)
-        if r.status_code != 200:
+        if not r.ok:
             self.logger.error(f"Bad status code received: {r.status_code}, {r.text}")
             return {}
         payload = json.loads(r.text)
@@ -200,7 +237,7 @@ class WalletHTTP:
         url = f"{self.wallet_url}v2/wallets/{wallet_id}"
         self.logger.debug(f"URL: {url}")
         r = requests.get(url)
-        if r.status_code != 200:
+        if not r.ok:
             self.logger.error(f"Bad status code received: {r.status_code}, {r.text}")
             return {}
         payload = json.loads(r.text)
@@ -228,7 +265,7 @@ class WalletHTTP:
         url = f"{self.wallet_url}v2/wallets/{wallet_id}"
         self.logger.debug(f"URL: {url}")
         r = requests.get(url)
-        if r.status_code != 200:
+        if not r.ok:
             self.logger.error(f"Bad status code received: {r.status_code}, {r.text}")
             return ()
         payload = json.loads(r.text)
@@ -241,7 +278,7 @@ class WalletHTTP:
         url = f"{self.wallet_url}v2/wallets/{wallet_id}/addresses"
         self.logger.debug(f"URL: {url}")
         r = requests.get(url)
-        if r.status_code != 200:
+        if not r.ok:
             self.logger.error(f"Bad status code received: {r.status_code}, {r.text}")
             return []
         payload = json.loads(r.text)
