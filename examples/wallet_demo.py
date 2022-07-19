@@ -32,6 +32,12 @@ def cli_demo(wallet_name: str, mnemonic: str, cleanup: bool = False):
     balance_builtin = cw_cli.get_balance(wallet.get("id"))
     assert math.isclose(balance, balance_builtin)
 
+    print("CLI: Getting UTxO stats")
+    print(cw_cli.get_utxo_stats(wallet.get("id")))
+
+    print("CLI: Getting UTxO snapshot")
+    print(cw_cli.get_utxo_snapshot(wallet.get("id")))
+
     if cleanup:
         print("CLI: Deleting wallet")
         cw_cli.delete_wallet(wallet.get("id"))
@@ -56,6 +62,12 @@ def http_demo(wallet_name: str, mnemonic: str, cleanup: bool = False):
     print("HTTP: Getting ADA balance using builtin method")
     balance_builtin = cw_api.get_balance(wallet.get("id"))[0].get("quantity")
     assert math.isclose(balance, balance_builtin)
+
+    print("HTTP: Getting UTxO stats")
+    print(cw_api.get_utxo_stats(wallet.get("id")))
+
+    print("HTTP: Getting UTxO snapshot")
+    print(cw_api.get_utxo_snapshot(wallet.get("id")))
 
     if cleanup:
         print("HTTP: Deleting wallet")

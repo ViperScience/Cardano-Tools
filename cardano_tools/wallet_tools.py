@@ -16,163 +16,6 @@ class WalletError(Exception):
     pass
 
 
-class WalletCLI:
-    def __init__(
-        self,
-        path_to_cli,
-        port=8090,
-        network="--mainnet",
-    ):
-        self.cli = path_to_cli
-        self.network = network
-        self.port = port
-        self.logger = logging.getLogger(__name__)
-
-    def run_cli(self, cmd) -> tuple:
-        # Execute the commands locally
-        # For network instances use the HTTP class.
-        cmd = f"{self.cli} {cmd}"
-        result = subprocess.run(shlex.split(cmd), capture_output=True)
-        stdout = result.stdout.decode().strip()
-        stderr = result.stderr.decode().strip()
-        self.logger.debug(f'CMD: "{cmd}"')
-        self.logger.debug(f'stdout: "{stdout}"')
-        self.logger.debug(f'stderr: "{stderr}"')
-        ResultType = namedtuple("Result", "stdout, stderr")
-        return ResultType(stdout, stderr)
-
-    def recovery_phrase_generate(self, size: int = 24) -> str:
-        """Generate a recovery or seed phrase (mnemonic)."""
-        result = self.run_cli(f"recovery-phrase generate --size={size}")
-        return result.stdout
-
-    def create_wallet(
-        self,
-        name: str,
-        recovery_phrase: str,
-        passphrase: str,
-        secondary_phrase: str = " ",
-        address_pool_gap: int = 20,
-    ) -> None:
-        """Creates a new wallet with the provided recovery phrase and optional secondary phrase"""
-        self.logger.debug(f"Running create wallet command...")
-        child = pexpect.spawn(
-            f"{self.cli} wallet create from-recovery-phrase {name} --port {self.port} --address-pool-gap {address_pool_gap}",
-            timeout=2,
-        )
-        try:
-            child.expect("Please enter the .* recovery phrase:")
-            child.sendline(recovery_phrase)
-            child.expect("Please enter a .* second factor:")
-            child.sendline(secondary_phrase)
-            child.expect("Please enter a passphrase:")
-            child.sendline(passphrase)
-            child.expect("Enter the passphrase a second time:")
-            child.sendline(passphrase)
-            child.expect("Ok.")
-            self.logger.debug(f"Create wallet result: {child.after}")
-        except:
-            self.logger.error(f"Error creating wallet: {child}")
-
-    def create_wallet_from_key(
-        self,
-        name: str,
-        xpub_key: str,
-        address_pool_gap: int = 20,
-    ) -> dict:
-        """Creates a new wallet with the provided account extended public key (public key + chain code)"""
-        self.logger.debug(f"Running create wallet command...")
-        res = self.run_cli(
-            f"wallet create from-public-key {name} --address-pool-gap {address_pool_gap} {xpub_key}"
-        )
-        if len(res.stdout) > 0:
-            wallet = json.loads(res.stdout)
-            return wallet
-        else:
-            return {}
-
-    def get_all_wallets(self) -> dict:
-        """Get a list of all created wallets known to the wallet service.
-
-        Returns
-        ----------
-        list
-            List of dicts each representing the wallet info.
-        """
-        wallet_list = []
-        res = self.run_cli("wallet list")
-        if len(res.stdout) > 0:
-            wallet_list = json.loads(res.stdout)
-            return wallet_list
-        else:
-            return {}
-
-    def get_wallet(self, wallet_id: str) -> dict:
-        """Find the wallet specified by the ID.
-
-        Parameters
-        ----------
-        wallet_id : str
-            The wallet ID.
-        """
-
-        res = self.run_cli(f"wallet get --port={self.port} {wallet_id}")
-        if "ok" in res.stderr.lower():
-            return json.loads(res.stdout)
-        return {}
-
-    def get_wallet_by_name(self, name: str) -> dict:
-        """Find the wallet from the supplied name (case insensitive).
-
-        Parameters
-        ----------
-        name : str
-            The arbitrary name of the wallet supplied during creation.
-        """
-
-        # First get a list of all wallets known to the local install.
-        all_wallets = self.get_all_wallets()
-        for wallet in all_wallets:
-            if wallet.get("name").lower() == name.lower():
-                return wallet
-        return {}
-
-    def delete_wallet(self, wallet_id: str) -> None:
-        """Delete a wallet from cardano-wallet data by ID.
-
-        Parameters
-        ----------
-        wallet_id : str
-            The wallet ID.
-
-        Raises
-        ------
-        WalletError
-            If the wallet ID is not found.
-        """
-        res = self.run_cli(f"wallet delete --port {self.port} {wallet_id}")
-        if len(res.stderr) > 3:  # stderr is "Ok." on success
-            raise WalletError(res.stderr)
-
-    def get_balance(self, wallet_id: str) -> float:
-        """Get the wallet balance in ADA.
-
-        Parameters
-        ----------
-        wallet_id : str
-            The wallet ID.
-
-        Returns
-        ----------
-        float
-            The total wallet balance (including rewards) in ADA.
-        """
-        # TODO: Add asset balance
-        wallet = self.get_wallet(wallet_id)
-        bal = float(wallet.get("balance").get("total").get("quantity"))
-        return bal / 1_000_000  # Return the value in units of ADA
-
-
 class WalletHTTP:
     def __init__(self, wallet_server: str = "http://localhost", wallet_server_port: int = 8090):
         self.wallet_url = f"{wallet_server}:{wallet_server_port}/"
@@ -316,6 +159,28 @@ class WalletHTTP:
         lovelace_balance = payload.get("balance").get("total")
         asset_balances = payload.get("assets").get("total")
         return lovelace_balance, asset_balances
+
+    def get_utxo_stats(self, wallet_id: str) -> tuple:
+        """Get wallet's UTxO distribution statistics"""
+        url = f"{self.wallet_url}v2/wallets/{wallet_id}/statistics/utxos"
+        self.logger.debug(f"URL: {url}")
+        r = requests.get(url)
+        if not r.ok:
+            self.logger.error(f"Bad status code received: {r.status_code}, {r.text}")
+            return ()
+        stats = json.loads(r.text)
+        return stats
+
+    def get_utxo_snapshot(self, wallet_id: str) -> tuple:
+        """Get wallet's UTxO snapshot"""
+        url = f"{self.wallet_url}v2/wallets/{wallet_id}/utxo"
+        self.logger.debug(f"URL: {url}")
+        r = requests.get(url)
+        if not r.ok:
+            self.logger.error(f"Bad status code received: {r.status_code}, {r.text}")
+            return ()
+        stats = json.loads(r.text)
+        return stats
 
     def get_addresses(self, wallet_id: str) -> list:
         """Returns a list of addresses tracked by the provided wallet"""
@@ -538,6 +403,177 @@ class WalletHTTP:
             self.confirm_tx(wallet_id, tx_id)
             return self.get_transacton(wallet_id, tx_id)
         return payload
+
+
+class WalletCLI:
+    def __init__(
+        self,
+        path_to_cli,
+        port=8090,
+        network="--mainnet",
+    ):
+        self.cli = path_to_cli
+        self.network = network
+        self.port = port
+        self.logger = logging.getLogger(__name__)
+
+    def run_cli(self, cmd) -> tuple:
+        # Execute the commands locally
+        # For network instances use the HTTP class.
+        cmd = f"{self.cli} {cmd}"
+        result = subprocess.run(shlex.split(cmd), capture_output=True)
+        stdout = result.stdout.decode().strip()
+        stderr = result.stderr.decode().strip()
+        self.logger.debug(f'CMD: "{cmd}"')
+        self.logger.debug(f'stdout: "{stdout}"')
+        self.logger.debug(f'stderr: "{stderr}"')
+        ResultType = namedtuple("Result", "stdout, stderr")
+        return ResultType(stdout, stderr)
+
+    def recovery_phrase_generate(self, size: int = 24) -> str:
+        """Generate a recovery or seed phrase (mnemonic)."""
+        result = self.run_cli(f"recovery-phrase generate --size={size}")
+        return result.stdout
+
+    def create_wallet(
+        self,
+        name: str,
+        recovery_phrase: str,
+        passphrase: str,
+        secondary_phrase: str = " ",
+        address_pool_gap: int = 20,
+    ) -> None:
+        """Creates a new wallet with the provided recovery phrase and optional secondary phrase"""
+        self.logger.debug(f"Running create wallet command...")
+        child = pexpect.spawn(
+            f"{self.cli} wallet create from-recovery-phrase {name} --port {self.port} --address-pool-gap {address_pool_gap}",
+            timeout=2,
+        )
+        try:
+            child.expect("Please enter the .* recovery phrase:")
+            child.sendline(recovery_phrase)
+            child.expect("Please enter a .* second factor:")
+            child.sendline(secondary_phrase)
+            child.expect("Please enter a passphrase:")
+            child.sendline(passphrase)
+            child.expect("Enter the passphrase a second time:")
+            child.sendline(passphrase)
+            child.expect("Ok.")
+            self.logger.debug(f"Create wallet result: {child.after}")
+        except:
+            self.logger.error(f"Error creating wallet: {child}")
+
+    def create_wallet_from_key(
+        self,
+        name: str,
+        xpub_key: str,
+        address_pool_gap: int = 20,
+    ) -> dict:
+        """Creates a new wallet with the provided account extended public key (public key + chain code)"""
+        self.logger.debug(f"Running create wallet command...")
+        res = self.run_cli(
+            f"wallet create from-public-key {name} --address-pool-gap {address_pool_gap} {xpub_key}"
+        )
+        if len(res.stdout) > 0:
+            wallet = json.loads(res.stdout)
+            return wallet
+        else:
+            return {}
+
+    def get_all_wallets(self) -> dict:
+        """Get a list of all created wallets known to the wallet service.
+
+        Returns
+        ----------
+        list
+            List of dicts each representing the wallet info.
+        """
+        wallet_list = []
+        res = self.run_cli("wallet list")
+        if len(res.stdout) > 0:
+            wallet_list = json.loads(res.stdout)
+            return wallet_list
+        else:
+            return {}
+
+    def get_wallet(self, wallet_id: str) -> dict:
+        """Find the wallet specified by the ID.
+
+        Parameters
+        ----------
+        wallet_id : str
+            The wallet ID.
+        """
+
+        res = self.run_cli(f"wallet get --port={self.port} {wallet_id}")
+        if "ok" in res.stderr.lower():
+            return json.loads(res.stdout)
+        return {}
+
+    def get_wallet_by_name(self, name: str) -> dict:
+        """Find the wallet from the supplied name (case insensitive).
+
+        Parameters
+        ----------
+        name : str
+            The arbitrary name of the wallet supplied during creation.
+        """
+
+        # First get a list of all wallets known to the local install.
+        all_wallets = self.get_all_wallets()
+        for wallet in all_wallets:
+            if wallet.get("name").lower() == name.lower():
+                return wallet
+        return {}
+
+    def delete_wallet(self, wallet_id: str) -> None:
+        """Delete a wallet from cardano-wallet data by ID.
+
+        Parameters
+        ----------
+        wallet_id : str
+            The wallet ID.
+
+        Raises
+        ------
+        WalletError
+            If the wallet ID is not found.
+        """
+        res = self.run_cli(f"wallet delete --port {self.port} {wallet_id}")
+        if len(res.stderr) > 3:  # stderr is "Ok." on success
+            raise WalletError(res.stderr)
+
+    def get_balance(self, wallet_id: str) -> float:
+        """Get the wallet balance in ADA.
+
+        Parameters
+        ----------
+        wallet_id : str
+            The wallet ID.
+
+        Returns
+        ----------
+        float
+            The total wallet balance (including rewards) in ADA.
+        """
+        # TODO: Add asset balance
+        wallet = self.get_wallet(wallet_id)
+        bal = float(wallet.get("balance").get("total").get("quantity"))
+        return bal / 1_000_000  # Return the value in units of ADA
+
+    def get_utxo_stats(self, wallet_id: str) -> dict:
+        """Get wallet's UTxO distribution statistics"""
+        wallet = self.get_wallet(wallet_id)
+        res = self.run_cli(f"wallet utxo --port {self.port} {wallet_id}")
+        if res:
+            return json.loads(res.stdout)
+
+    def get_utxo_snapshot(self, wallet_id: str) -> dict:
+        """Get wallet's UTxO snapshot"""
+        wallet = self.get_wallet(wallet_id)
+        res = self.run_cli(f"wallet utxo-snapshot --port {self.port} {wallet_id}")
+        if res:
+            return json.loads(res.stdout)
 
 
 if __name__ == "__main__":
