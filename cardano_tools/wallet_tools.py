@@ -17,6 +17,10 @@ class WalletError(Exception):
 
 
 class WalletHTTP:
+    """While cardano-wallet provides 2 APIs, HTTP and CLI, the HTTP API has more features, so we
+    primarily support HTTP with this library
+    """
+
     def __init__(self, wallet_server: str = "http://localhost", wallet_server_port: int = 8090):
         self.wallet_url = f"{wallet_server}:{wallet_server_port}/"
         self.logger = logging.getLogger(__name__)
@@ -406,6 +410,8 @@ class WalletHTTP:
 
 
 class WalletCLI:
+    """We recommend using the WalletHTTP class over this CLI class"""
+
     def __init__(
         self,
         path_to_cli,

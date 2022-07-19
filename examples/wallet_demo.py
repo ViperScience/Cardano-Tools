@@ -7,43 +7,15 @@ logging.basicConfig(level=logging.INFO)
 
 
 def generate_mnemonic():
+    """We need to use the CLI API to generate the mnemonmic, as it is not supported
+    by the HTTP API. We use HTTP for everything else.
+    """
     print("Generating new mnemonic phrase")
     cw_cli = WalletCLI(path_to_cli="cardano-wallet")
     return cw_cli.recovery_phrase_generate()
 
 
-def cli_demo(wallet_name: str, mnemonic: str, cleanup: bool = False):
-    cw_cli = WalletCLI(path_to_cli="cardano-wallet")
-
-    print("CLI: Creating new wallet")
-    cw_cli.create_wallet(wallet_name, mnemonic, "$3cur3p@$$ph@$3")
-
-    print("CLI: Getting wallet by name")
-    wallet: dict = cw_cli.get_wallet_by_name(wallet_name)
-
-    print("CLI: Getting wallet by ID")
-    wallet_by_id: dict = cw_cli.get_wallet(wallet.get("id"))
-    assert wallet_by_id.get("id") == wallet.get("id")
-
-    print("CLI: Getting ADA balance from metadata")
-    balance = wallet.get("balance").get("total").get("quantity") / 1_000_000
-
-    print("CLI: Getting ADA balance using builtin method")
-    balance_builtin = cw_cli.get_balance(wallet.get("id"))
-    assert math.isclose(balance, balance_builtin)
-
-    print("CLI: Getting UTxO stats")
-    print(cw_cli.get_utxo_stats(wallet.get("id")))
-
-    print("CLI: Getting UTxO snapshot")
-    print(cw_cli.get_utxo_snapshot(wallet.get("id")))
-
-    if cleanup:
-        print("CLI: Deleting wallet")
-        cw_cli.delete_wallet(wallet.get("id"))
-
-
-def http_demo(wallet_name: str, mnemonic: str, cleanup: bool = False):
+def wallet_demo(wallet_name: str, mnemonic: str, cleanup: bool = False):
     cw_api = WalletHTTP()
 
     print("HTTP: Creating wallet")
@@ -76,5 +48,4 @@ def http_demo(wallet_name: str, mnemonic: str, cleanup: bool = False):
 
 if __name__ == "__main__":
     mnemonic = generate_mnemonic()
-    # cli_demo("CliRandomWallet", mnemonic, cleanup=True)
-    http_demo("HttpTestWallet", mnemonic, cleanup=True)
+    wallet_demo("TestWallet", mnemonic, cleanup=True)
