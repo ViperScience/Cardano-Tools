@@ -18,32 +18,35 @@ def generate_mnemonic():
 def wallet_demo(wallet_name: str, mnemonic: str, cleanup: bool = False):
     cw_api = WalletHTTP()
 
-    print("HTTP: Creating wallet")
+    print("Creating wallet")
     cw_api.create_wallet(wallet_name, mnemonic.split(" "), "$3cur3p@$$ph@$3")
 
-    print("HTTP: Getting wallet by name")
+    print("Getting wallet by name")
     wallet: dict = cw_api.get_wallet_by_name(wallet_name)
+    wallet_id: str = wallet.get("id")
 
-    print("HTTP: Getting wallet by ID")
-    wallet_by_id: dict = cw_api.get_wallet(wallet.get("id"))
-    assert wallet_by_id.get("id") == wallet.get("id")
+    print("Getting wallet by ID")
+    wallet_by_id: dict = cw_api.get_wallet(wallet_id)
+    assert wallet_by_id.get("id") == wallet_id
 
-    print("HTTP: Getting ADA balance from metadata")
     balance = wallet.get("balance").get("total").get("quantity") / 1_000_000
+    print(f"Getting ADA balance from metadata: {balance}")
 
-    print("HTTP: Getting ADA balance using builtin method")
-    balance_builtin = cw_api.get_balance(wallet.get("id"))[0].get("quantity")
+    balance_builtin = cw_api.get_balance(wallet_id)[0].get("quantity")
+    print(f"Getting ADA balance using builtin method: {balance_builtin}")
     assert math.isclose(balance, balance_builtin)
 
-    print("HTTP: Getting UTxO stats")
-    print(cw_api.get_utxo_stats(wallet.get("id")))
+    print(f"First address of wallet: {cw_api.get_addresses(wallet_id)[0]}")
 
-    print("HTTP: Getting UTxO snapshot")
-    print(cw_api.get_utxo_snapshot(wallet.get("id")))
+    print("Getting UTxO stats")
+    print(cw_api.get_utxo_stats(wallet_id))
+
+    print("Getting UTxO snapshot")
+    print(cw_api.get_utxo_snapshot(wallet_id))
 
     if cleanup:
-        print("HTTP: Deleting wallet")
-        cw_api.delete_wallet(wallet.get("id"))
+        print("Deleting wallet")
+        cw_api.delete_wallet(wallet_id)
 
 
 if __name__ == "__main__":
