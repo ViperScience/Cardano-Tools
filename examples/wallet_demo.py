@@ -15,40 +15,84 @@ def generate_mnemonic():
     return cw_cli.recovery_phrase_generate()
 
 
-def wallet_demo(wallet_name: str, mnemonic: str, cleanup: bool = False):
+def wallet_demo(
+    wallet1_name: str, mnemonic1: str, wallet2_name: str, mnemonic2: str, cleanup: bool = False
+):
     cw_api = WalletHTTP()
 
-    print("Creating wallet")
-    cw_api.create_wallet(wallet_name, mnemonic.split(" "), "$3cur3p@$$ph@$3")
+    if not cw_api.get_wallet_by_name(wallet1_name):
+        print(f"Creating wallet: {wallet1_name}")
+        cw_api.create_wallet(wallet1_name, mnemonic1.split(" "), "$3cur3p@$$ph@$3")
+    else:
+        print(f"Wallet {wallet1_name} already imported")
 
-    print("Getting wallet by name")
-    wallet: dict = cw_api.get_wallet_by_name(wallet_name)
-    wallet_id: str = wallet.get("id")
+    if not cw_api.get_wallet_by_name(wallet2_name):
+        print(f"Creating wallet: {wallet2_name}")
+        cw_api.create_wallet(wallet2_name, mnemonic2.split(" "), "$3cur3p@$$ph@$3")
+    else:
+        print(f"Wallet {wallet2_name} already imported")
+    print("")
 
-    print("Getting wallet by ID")
-    wallet_by_id: dict = cw_api.get_wallet(wallet_id)
-    assert wallet_by_id.get("id") == wallet_id
+    print("Getting wallets by name...")
+    w1: dict = cw_api.get_wallet_by_name(wallet1_name)
+    w1_id: str = w1.get("id")
+    w2: dict = cw_api.get_wallet_by_name(wallet2_name)
+    w2_id: str = w2.get("id")
+    print("")
 
-    balance = wallet.get("balance").get("total").get("quantity") / 1_000_000
-    print(f"Getting ADA balance from metadata: {balance}")
+    print("Getting wallets by ID...")
+    wallet_by_id: dict = cw_api.get_wallet(w1_id)
+    assert wallet_by_id.get("id") == w1_id
+    print("")
 
-    balance_builtin = cw_api.get_balance(wallet_id)[0].get("quantity")
-    print(f"Getting ADA balance using builtin method: {balance_builtin}")
-    assert math.isclose(balance, balance_builtin)
+    # Get wallet balance 2 ways: from metadata and from builtin method
+    w1_balance_metadata = w1.get("balance").get("total").get("quantity") / 1_000_000
+    w1_balance = cw_api.get_balance(w1_id)
+    w1_ada_balance = w1_balance[0].get("quantity") / 1_000_000
+    assert math.isclose(w1_balance_metadata, w1_ada_balance)
+    print(f"{wallet1_name} balance: {w1_ada_balance} ADA")
+    w2_balance = cw_api.get_balance(w2_id)
+    w2_ada_balance = w2_balance[0].get("quantity") / 1_000_000
+    print(f"{wallet2_name} balance: {w2_ada_balance} ADA")
+    print("")
 
-    print(f"First address of wallet: {cw_api.get_addresses(wallet_id)[0]}")
+    # Check for tokens
+    if len(w1_balance) > 1:
+        w1_tokens = w1_balance[1]
+        print(f"{wallet1_name} has the following tokens:")
+        for token in w1_tokens:
+            print(f"\t{token}")
+    if len(w2_balance) > 1:
+        w2_tokens = w2_balance[1]
+        print(f"{wallet2_name} has the following tokens:")
+        for token in w2_tokens:
+            print(f"\t{token}")
+    print("")
 
-    print("Getting UTxO stats")
-    print(cw_api.get_utxo_stats(wallet_id))
+    print(f"First address of {wallet1_name}: {cw_api.get_addresses(w1_id)[0]}")
+    print(f"First address of {wallet2_name}: {cw_api.get_addresses(w2_id)[0]}")
+    print("")
 
-    print("Getting UTxO snapshot")
-    print(cw_api.get_utxo_snapshot(wallet_id))
+    print(f"{wallet1_name} UTxO stats:")
+    print(f"\t{cw_api.get_utxo_stats(w1_id)}")
+    print("")
+
+    print(f"{wallet1_name} UTxO snapshot:")
+    print(f"\t{cw_api.get_utxo_snapshot(w1_id)}")
+    print("")
+
+    print(f"Network parameters: {cw_api.get_network_params()}")
+    print("")
 
     if cleanup:
-        print("Deleting wallet")
-        cw_api.delete_wallet(wallet_id)
+        print("Deleting wallets")
+        cw_api.delete_wallet(w1_id)
+        cw_api.delete_wallet(w2_id)
 
 
 if __name__ == "__main__":
-    mnemonic = generate_mnemonic()
-    wallet_demo("TestWallet", mnemonic, cleanup=True)
+    # mnemonic = generate_mnemonic()
+    # Use fixed testnet wallets so we can work with a nonzero balance
+    w1_seed = "fragile pottery wolf snack wet dolphin wish guard step track second rally panda desk because hollow route carpet ghost worry address ecology frown join"
+    w2_seed = "evoke pull giraffe enhance beach ripple alien pottery beach bubble rail hold finish slice power parade brief rough fame type hungry guilt tail cabbage"
+    wallet_demo("TestWallet1", w1_seed, "TestWallet2", w2_seed, cleanup=False)
