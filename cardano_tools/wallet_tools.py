@@ -266,6 +266,18 @@ class WalletHTTP:
         self.logger.debug(r.text)
         return payload
 
+    def get_asset(self, wallet_id: str, policy_id: str, asset_name: str) -> dict:
+        """Fetch a single asset associated with the wallet (i.e. must have at one point been spendable by the wallet)"""
+        url = f"{self.wallet_url}v2/wallets/{wallet_id}/assets/{policy_id}/{asset_name}"
+        self.logger.debug(f"URL: {url}")
+        r = requests.get(url)
+        if not r.ok:
+            self.logger.error(f"Bad status code received: {r.status_code}, {r.text}")
+            return {}
+        payload = json.loads(r.text)
+        self.logger.debug(r.text)
+        return payload
+
     def send_lovelace(
         self,
         wallet_id: str,

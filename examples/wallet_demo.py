@@ -94,6 +94,14 @@ def wallet_demo(
     print(f"{wallet2_name} associated assets w/ metadata: {w2_assets}")
     print("")
 
+    if len(w1_balance) > 1:
+        print(f"Getting first asset of {wallet1_name}...")
+        policy_id = w1_tokens[0].get("policy_id")
+        asset_name = w1_tokens[0].get("asset_name")
+        first_asset = cw_api.get_asset(w1_id, policy_id, asset_name)
+        print(f"\t{first_asset}")
+        print("")
+
     print(f"First address of {wallet1_name}: {cw_api.get_addresses(w1_id)[0]}")
     print(f"First address of {wallet2_name}: {cw_api.get_addresses(w2_id)[0]}")
     print("")
