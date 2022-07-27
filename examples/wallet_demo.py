@@ -19,16 +19,17 @@ def wallet_demo(
     wallet1_name: str, mnemonic1: str, wallet2_name: str, mnemonic2: str, cleanup: bool = False
 ):
     cw_api = WalletHTTP()
+    default_passphrase = "$3cur3p@$$ph@$3"
 
     if not cw_api.get_wallet_by_name(wallet1_name):
         print(f"Creating wallet: {wallet1_name}")
-        cw_api.create_wallet(wallet1_name, mnemonic1.split(" "), "$3cur3p@$$ph@$3")
+        cw_api.create_wallet(wallet1_name, mnemonic1.split(" "), default_passphrase)
     else:
         print(f"Wallet {wallet1_name} already imported")
 
     if not cw_api.get_wallet_by_name(wallet2_name):
         print(f"Creating wallet: {wallet2_name}")
-        cw_api.create_wallet(wallet2_name, mnemonic2.split(" "), "$3cur3p@$$ph@$3")
+        cw_api.create_wallet(wallet2_name, mnemonic2.split(" "), default_passphrase)
     else:
         print(f"Wallet {wallet2_name} already imported")
     print("")
@@ -45,6 +46,23 @@ def wallet_demo(
     assert wallet_by_id.get("id") == w1_id
     print("")
 
+    print("Renaming wallet...")
+    print("")
+    new_name = f"{wallet1_name}_renamed"
+    result = cw_api.rename_wallet(w1_id, new_name)
+    assert result.get("name") == new_name
+    # Change back to old name
+    result = cw_api.rename_wallet(w1_id, wallet1_name)
+    assert result.get("name") == wallet1_name
+
+    print("Changing wallet passphrase...")
+    print("")
+    result = cw_api.update_passphrase(w1_id, default_passphrase, f"{default_passphrase}+1")
+    assert result
+    # Change passphrase back to original
+    result = cw_api.update_passphrase(w1_id, f"{default_passphrase}+1", default_passphrase)
+    assert result
+
     # Get wallet balance 2 ways: from metadata and from builtin method
     w1_balance_metadata = w1.get("balance").get("total").get("quantity") / 1_000_000
     w1_balance = cw_api.get_balance(w1_id)
@@ -56,17 +74,24 @@ def wallet_demo(
     print(f"{wallet2_name} balance: {w2_ada_balance} ADA")
     print("")
 
-    # Check for tokens
+    # List assets from metadata
     if len(w1_balance) > 1:
         w1_tokens = w1_balance[1]
-        print(f"{wallet1_name} has the following tokens:")
+        print(f"{wallet1_name} has the following assets:")
         for token in w1_tokens:
             print(f"\t{token}")
     if len(w2_balance) > 1:
         w2_tokens = w2_balance[1]
-        print(f"{wallet2_name} has the following tokens:")
+        print(f"{wallet2_name} has the following assets:")
         for token in w2_tokens:
             print(f"\t{token}")
+    print("")
+
+    # List assets using builtin method
+    w1_assets = cw_api.get_assets(w1_id)
+    print(f"{wallet1_name} associated assets w/ metadata: {w1_assets}")
+    w2_assets = cw_api.get_assets(w2_id)
+    print(f"{wallet2_name} associated assets w/ metadata: {w2_assets}")
     print("")
 
     print(f"First address of {wallet1_name}: {cw_api.get_addresses(w1_id)[0]}")

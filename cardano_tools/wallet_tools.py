@@ -92,6 +92,32 @@ class WalletHTTP:
         self.logger.debug(r.text)
         return payload
 
+    def rename_wallet(self, wallet_id: str, name: str) -> dict:
+        """Changes the name of the specified wallet"""
+        url = f"{self.wallet_url}v2/wallets/{wallet_id}"
+        self.logger.debug(f"URL: {url}")
+        headers = {"Content-type": "application/json"}
+        payload = {"name": name}
+        r = requests.put(url, headers=headers, json=payload)
+        if not r.ok:
+            self.logger.error(f"Bad status code received: {r.status_code}, {r.text}")
+            return {}
+        payload = json.loads(r.text)
+        self.logger.debug(r.text)
+        return payload
+
+    def update_passphrase(self, wallet_id: str, old_passphrase: str, new_passphrase: str) -> bool:
+        """Changes the name of the specified wallet"""
+        url = f"{self.wallet_url}v2/wallets/{wallet_id}/passphrase"
+        self.logger.debug(f"URL: {url}")
+        headers = {"Content-type": "application/json"}
+        payload = {"old_passphrase": old_passphrase, "new_passphrase": new_passphrase}
+        r = requests.put(url, headers=headers, json=payload)
+        if not r.ok:
+            self.logger.error(f"Bad status code received: {r.status_code}, {r.text}")
+            return False
+        return True
+
     def delete_wallet(self, wallet_id: str) -> None:
         url = f"{self.wallet_url}v2/wallets/{wallet_id}"
         self.logger.debug(f"URL: {url}")
@@ -227,6 +253,18 @@ class WalletHTTP:
                 raise WalletError("Timeout waiting for transaction confirmation.")
             self.logger.info("Transaction not yet confirmed, pausing before next check...")
             time.sleep(pause)
+
+    def get_assets(self, wallet_id: str) -> dict:
+        """List all assets associated with the wallet (i.e. assets that have ever been spendable by the wallet)"""
+        url = f"{self.wallet_url}v2/wallets/{wallet_id}/assets"
+        self.logger.debug(f"URL: {url}")
+        r = requests.get(url)
+        if not r.ok:
+            self.logger.error(f"Bad status code received: {r.status_code}, {r.text}")
+            return {}
+        payload = json.loads(r.text)
+        self.logger.debug(r.text)
+        return payload
 
     def send_lovelace(
         self,
