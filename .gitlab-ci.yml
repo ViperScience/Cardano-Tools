@@ -1,6 +1,6 @@
 before_script:
-  - python --version  # For debugging
-  - python -m pip install poetry
+  - python3 --version  # For debugging
+  - python3 -m pip install poetry
   - poetry install
 
 test-windows:
