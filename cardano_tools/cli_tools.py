@@ -116,7 +116,12 @@ class NodeCLI:
         ada_only_utxo_size = utxo_entry_size_without_val + coin_Size
 
         # Calculate the minimum UTxO from network parameters
-        utxo_cost_word = self.get_protocol_parameters().get("utxoCostPerByte")
+        # Babbage era changed utxoCostPerWord to utxoCostPerByte
+        params = self.get_protocol_parameters()
+        if params.get("utxoCostPerWord"):
+            utxo_cost_word = self.get_protocol_parameters().get("utxoCostPerWord")
+        else:
+            utxo_cost_word = self.get_protocol_parameters().get("utxoCostPerByte")
         return ada_only_utxo_size * utxo_cost_word
 
     def cli_tip_query(self):
