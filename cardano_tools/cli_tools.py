@@ -90,32 +90,33 @@ class NodeCLI:
     def _cleanup_file(self, fpath):
         os.remove(fpath)
 
-    def load_protocol_parameters(self):
+    def get_protocol_parameters(self):
         """Load the protocol parameters which are needed for creating
         transactions.
         """
-        params_file = os.path.join(self.working_dir, "protocol.json")
+        if self.protocol_parameters is None:
+            stdout, stderr = self.run_cli(
+                f"{self.cli} query protocol-parameters {self.network} "
+            )
+            self.protocol_parameters = json.loads(stdout)
+        return self.protocol_parameters
+
+    def save_protocol_parameters(self, outfile: str):
+        """Saves the protocol parameters to the specified file
+        """
         self.run_cli(
-            f"{self.cli} query protocol-parameters {self.network} "
-            f"--out-file {repr(params_file)}"
+            f"{self.cli} query protocol-parameters {self.network} --out-file {outfile}"
         )
-        json_data = self._load_text_file(params_file)
-        self.protocol_parameters = json.loads(json_data)
-        return params_file
 
     def get_min_utxo(self) -> int:
         """Get the minimum ADA only UTxO size."""
-
-        # Ensure the parameters file exists
-        self.load_protocol_parameters()
-
         # These are constants but may change in the future
         coin_Size = 2
         utxo_entry_size_without_val = 27
         ada_only_utxo_size = utxo_entry_size_without_val + coin_Size
 
         # Calculate the minimum UTxO from network parameters
-        utxo_cost_word = self.protocol_parameters["utxoCostPerWord"]
+        utxo_cost_word = self.get_protocol_parameters().get("utxoCostPerByte")
         return ada_only_utxo_size * utxo_cost_word
 
     def cli_tip_query(self):
@@ -319,7 +320,7 @@ class NodeCLI:
         int
             The minimum fee in lovelaces.
         """
-        params_file = self.load_protocol_parameters()
+        params_file = self.get_protocol_parameters()
         result = self.run_cli(
             f"{self.cli} transaction calculate-min-fee "
             f"--tx-body-file {tx_draft} "
@@ -437,7 +438,7 @@ class NodeCLI:
         utxos.sort(key=lambda k: k["Lovelace"], reverse=True)
 
         # Ensure the parameters file exists
-        self.load_protocol_parameters()
+        self.get_protocol_parameters()
 
         # Iterate through the UTXOs until we have enough funds to cover the
         # transaction. Also, create the tx_in string for the transaction.
@@ -461,7 +462,7 @@ class NodeCLI:
             min_fee = self.calc_min_fee(tx_draft_file, utxo_count, tx_out_count=1, witness_count=2)
 
             # TX cost
-            cost = min_fee + self.protocol_parameters["stakeAddressDeposit"]
+            cost = min_fee + self.get_protocol_parameters.get("stakeAddressDeposit")
             if utxo_total > cost:
                 break
 
@@ -1335,7 +1336,7 @@ class NodeCLI:
         ttl = tip + self.ttl_buffer
 
         # Ensure the parameters file exists
-        self.load_protocol_parameters()
+        self.get_protocol_parameters()
 
         # Iterate through the UTXOs until we have enough funds to cover the
         # transaction. Also, create the tx_in string for the transaction.
@@ -1584,7 +1585,7 @@ class NodeCLI:
         ttl = tip + self.ttl_buffer
 
         # Ensure the parameters file exists
-        self.load_protocol_parameters()
+        self.get_protocol_parameters()
 
         # Iterate through the UTXOs until we have enough funds to cover the
         # transaction. Also, create the tx_in string for the transaction.
@@ -1695,8 +1696,8 @@ class NodeCLI:
         """
 
         # Get the network parameters
-        self.load_protocol_parameters()
-        e_max = self.protocol_parameters["eMax"]
+        self.get_protocol_parameters()
+        e_max = self.get_protocol_parameters().get("eMax")
 
         # Make sure the remaining epochs is a valid number.
         if remaining_epochs < 1:
@@ -1866,7 +1867,7 @@ class NodeCLI:
         tx_name = datetime.now().strftime("claim_rewards_%Y-%m-%d_%Hh%Mm%Ss")
 
         # Ensure the parameters file exists
-        self.load_protocol_parameters()
+        self.get_protocol_parameters()
 
         # Determine the TTL
         tip = self.get_tip()
@@ -2227,12 +2228,8 @@ class NodeCLI:
         int
             The minimum transaction output (Lovelace).
         """
-
-        # Ensure the parameters file exists
-        self.load_protocol_parameters()
-
         # Use the globally defined function
-        return utils.minimum_utxo(assets, self.protocol_parameters)
+        return utils.minimum_utxo(assets, self.get_protocol_parameters())
 
     def _get_token_utxos(self, addr, policy_id, asset_names, quantities):
         """Get a list of UTxOs that contain the desired assets.

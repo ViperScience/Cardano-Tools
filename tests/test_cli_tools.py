@@ -67,10 +67,9 @@ def test_get_era(cli_node, era):
     assert cli_node.get_era().lower() == era
 
 
-def test_load_protocol_parameters(cli_node):
-    params_file = cli_node.load_protocol_parameters()
-    json_data = json.loads(cli_node._load_text_file(params_file))
-    assert "protocolVersion" in json_data
+def test_get_protocol_parameters(cli_node):
+    params = cli_node.get_protocol_parameters()
+    assert "protocolVersion" in params 
 
 
 def test_get_min_utxo(cli_node):
