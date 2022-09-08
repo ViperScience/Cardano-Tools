@@ -1,4 +1,5 @@
 import logging
+import time
 import math
 
 from cardano_tools import WalletCLI, WalletHTTP
@@ -65,25 +66,23 @@ def wallet_demo(
 
     # Get wallet balance 2 ways: from metadata and from builtin method
     w1_balance_metadata = w1.get("balance").get("total").get("quantity") / 1_000_000
-    w1_balance = cw_api.get_balance(w1_id)
-    w1_ada_balance = w1_balance[0].get("quantity") / 1_000_000
+    w1_ada_balance, w1_token_balance = cw_api.get_balance(w1_id)
+    w1_ada_balance = w1_ada_balance.get("quantity") / 1_000_000
     assert math.isclose(w1_balance_metadata, w1_ada_balance)
     print(f"{wallet1_name} balance: {w1_ada_balance} ADA")
-    w2_balance = cw_api.get_balance(w2_id)
-    w2_ada_balance = w2_balance[0].get("quantity") / 1_000_000
+    w2_ada_balance, w2_token_balance = cw_api.get_balance(w2_id)
+    w2_ada_balance = w2_ada_balance.get("quantity") / 1_000_000
     print(f"{wallet2_name} balance: {w2_ada_balance} ADA")
     print("")
 
     # List assets from metadata
-    if len(w1_balance) > 1:
-        w1_tokens = w1_balance[1]
+    if len(w1_token_balance) > 1:
         print(f"{wallet1_name} has the following assets:")
-        for token in w1_tokens:
+        for token in w1_token_balance:
             print(f"\t{token}")
-    if len(w2_balance) > 1:
-        w2_tokens = w2_balance[1]
+    if len(w2_token_balance) > 1:
         print(f"{wallet2_name} has the following assets:")
-        for token in w2_tokens:
+        for token in w2_token_balance:
             print(f"\t{token}")
     print("")
 
@@ -94,7 +93,7 @@ def wallet_demo(
     print(f"{wallet2_name} associated assets w/ metadata: {w2_assets}")
     print("")
 
-    if len(w1_balance) > 1:
+    if len(w1_token_balance) > 1:
         print(f"Getting first asset of {wallet1_name}...")
         policy_id = w1_tokens[0].get("policy_id")
         asset_name = w1_tokens[0].get("asset_name")
@@ -102,9 +101,25 @@ def wallet_demo(
         print(f"\t{first_asset}")
         print("")
 
-    print(f"First address of {wallet1_name}: {cw_api.get_addresses(w1_id)[0]}")
-    print(f"First address of {wallet2_name}: {cw_api.get_addresses(w2_id)[0]}")
+    w1_a1 = cw_api.get_addresses(w1_id)[0]
+    print(f"First address of {wallet1_name}: {w1_a1}")
+    print(f"Address inspect: {cw_api.inspect_address(w1_a1)}")
+    w2_a1 = cw_api.get_addresses(w2_id)[0]
+    print(f"First address of {wallet2_name}: {w2_a1}")
+    print(f"Address inspect: {cw_api.inspect_address(w2_a1)}")
     print("")
+
+    estimated_fee = cw_api.estimate_tx_fee(w1_id, w2_a1, 10_000_000)
+    print(f"Estimated transaction fee for sending 10 ADA: {estimated_fee}")
+
+    print(f"Sending 10 ADA from {wallet1_name} to {wallet2_name}...")
+    cw_api.send_ada(w1_id, w2_a1, 10, default_passphrase, wait=True)
+    w1_new_balance = cw_api.get_balance(w1_id)[0].get("quantity") / 1_000_000
+    w2_new_balance = cw_api.get_balance(w2_id)[0].get("quantity") / 1_000_000
+    print(f"{wallet1_name} new balance: {w1_new_balance}")
+    print(f"{wallet2_name} new balance: {w2_new_balance}")
+    print("")
+
 
     print(f"{wallet1_name} UTxO stats:")
     print(f"\t{cw_api.get_utxo_stats(w1_id)}")
@@ -112,6 +127,10 @@ def wallet_demo(
 
     print(f"{wallet1_name} UTxO snapshot:")
     print(f"\t{cw_api.get_utxo_snapshot(w1_id)}")
+    print("")
+
+    w1_txs = cw_api.get_transactions(w1_id)
+    print(f"{wallet1_name} first transaction: {w1_txs[0]}")
     print("")
 
     print(f"Network parameters: {cw_api.get_network_params()}")

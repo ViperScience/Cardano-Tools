@@ -224,10 +224,33 @@ class WalletHTTP:
         addresses = [elem.get("id") for elem in payload]
         return addresses
 
+    def inspect_address(self, address: str) -> dict:
+        """Get useful information about the structure of an address"""
+        url = f"{self.wallet_url}v2/addresses/{address}"
+        self.logger.debug(f"URL: {url}")
+        r = requests.get(url)
+        if not r.ok:
+            self.logger.error(f"Bad status code received: {r.status_code}, {r.text}")
+            return []
+        payload = json.loads(r.text)
+        return payload
+
     def get_transacton(self, wallet_id: str, tx_id: str) -> dict:
         """Pull information about the specified transaction."""
         self.logger.info(f"Querying information for transaction {tx_id}")
         url = f"{self.wallet_url}v2/wallets/{wallet_id}/transactions/{tx_id}"
+        self.logger.debug(f"URL: {url}")
+        r = requests.get(url)
+        if not r.ok:
+            self.logger.error(f"Bad status code received: {r.status_code}, {r.text}")
+            return {}
+        payload = json.loads(r.text)
+        self.logger.debug(r.text)
+        return payload
+
+    def get_transactions(self, wallet_id: str) -> dict:
+        """List all transactions for the given wallet"""
+        url = f"{self.wallet_url}v2/wallets/{wallet_id}/transactions"
         self.logger.debug(f"URL: {url}")
         r = requests.get(url)
         if not r.ok:
@@ -280,6 +303,39 @@ class WalletHTTP:
         payload = json.loads(r.text)
         self.logger.debug(r.text)
         return payload
+
+    def estimate_tx_fee(
+        self,
+        wallet_id: str,
+        rx_address: str,
+        quantity: int,
+    ) -> dict:
+        """Estimate the fee for a transaction"""
+        url = f"{self.wallet_url}v2/wallets/{wallet_id}/payment-fees"
+        self.logger.debug(f"URL: {url}")
+        headers = {
+            "Content-type": "application/json",
+            "Accept": "application/json",
+        }
+        tx_body = {
+            "payments": [
+                {
+                    "address": rx_address,
+                    "amount": {"quantity": quantity, "unit": "lovelace"},
+                }
+            ],
+            "withdrawal": "self",
+        }
+        self.logger.debug(
+            f"Estimate fees for sending {quantity:,} lovelace ({quantity / 1e6} ADA) to address {rx_address}..."
+        )
+        r = requests.post(url, json=tx_body, headers=headers)
+        if not r.ok:
+            self.logger.error(f"Bad status code received: {r.status_code}, {r.text}")
+            return {}
+        payload = json.loads(r.text)
+        return payload
+
 
     def send_lovelace(
         self,
@@ -633,6 +689,7 @@ class WalletCLI:
         res = self.run_cli(f"wallet utxo-snapshot --port {self.port} {wallet_id}")
         if res:
             return json.loads(res.stdout)
+
 
 
 if __name__ == "__main__":
