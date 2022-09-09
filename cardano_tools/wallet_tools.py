@@ -51,6 +51,18 @@ class WalletHTTP:
         self.logger.debug(r.text)
         return payload
 
+    def get_smash_health(self) -> dict:
+        """Get health status of currently active SMASH server"""
+        url = f"{self.wallet_url}v2/smash/health"
+        self.logger.debug(f"URL: {url}")
+        r = requests.get(url)
+        if not r.ok:
+            self.logger.error(f"Bad status code received: {r.status_code}, {r.text}")
+            return {}
+        payload = json.loads(r.text)
+        self.logger.debug(r.text)
+        return payload
+
     def get_network_info(self) -> dict:
         """Returns network information"""
         url = f"{self.wallet_url}v2/network/information"
