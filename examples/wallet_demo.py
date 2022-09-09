@@ -156,8 +156,13 @@ def wallet_demo(
     print(f"Decoded transaction: {decoded_tx}")
     print("")
 
-    print(f"Submitting transaction...")
-    tx_output = cw_api.submit_transaction(w1_id, signed_tx.get("transaction"))
+    # print(f"Submitting transaction...")
+    # tx_output = cw_api.submit_transaction(w1_id, signed_tx.get("transaction"))
+    # print("")
+
+    migration_plan = cw_api.create_migration_plan(w1_id, [w2_a1])
+    print(f"Plan for migrating {wallet1_name} UTxO balance to {wallet2_name}:")
+    print(migration_plan)
     print("")
 
     print(f"{wallet1_name} UTxO stats:")
@@ -175,6 +180,12 @@ def wallet_demo(
     print("")
 
     print(f"Network parameters: {cw_api.get_network_params()}")
+    print("")
+
+    print(f"Network information: {cw_api.get_network_info()}")
+    print("")
+
+    print(f"Network clock: {cw_api.get_network_clock()}")
     print("")
 
     if cleanup:

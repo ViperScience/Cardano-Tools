@@ -26,9 +26,70 @@ class WalletHTTP:
         self.wallet_url = f"{wallet_server}:{wallet_server_port}/"
         self.logger = logging.getLogger(__name__)
 
+    def get_settings(self) -> dict:
+        """Returns wallet server settings"""
+        url = f"{self.wallet_url}v2/settings"
+        self.logger.debug(f"URL: {url}")
+        r = requests.get(url)
+        if not r.ok:
+            self.logger.error(f"Bad status code received: {r.status_code}, {r.text}")
+            return {}
+        payload = json.loads(r.text)
+        self.logger.debug(r.text)
+        return payload
+
+    def update_settings(self, smash_source: str) -> dict:
+        """Updates wallet server settings. Currently, the only setting is SMASH server URL"""
+        url = f"{self.wallet_url}v2/settings"
+        headers = {"Content-type": "application/json"}
+        payload = {"pool_metadata_source": smash_source}
+        r = requests.put(url, headers=headers, json=payload)
+        if not r.ok:
+            self.logger.error(f"Bad status code received: {r.status_code}, {r.text}")
+            return {}
+        payload = json.loads(r.text)
+        self.logger.debug(r.text)
+        return payload
+
+    def get_network_info(self) -> dict:
+        """Returns network information"""
+        url = f"{self.wallet_url}v2/network/information"
+        self.logger.debug(f"URL: {url}")
+        r = requests.get(url)
+        if not r.ok:
+            self.logger.error(f"Bad status code received: {r.status_code}, {r.text}")
+            return {}
+        payload = json.loads(r.text)
+        self.logger.debug(r.text)
+        return payload
+
+    def get_network_clock(self, force_ntp_check: bool = False) -> dict:
+        """Returns network clock status"""
+        url = f"{self.wallet_url}v2/network/clock?forceNtpCheck={force_ntp_check}"
+        self.logger.debug(f"URL: {url}")
+        r = requests.get(url)
+        if not r.ok:
+            self.logger.error(f"Bad status code received: {r.status_code}, {r.text}")
+            return {}
+        payload = json.loads(r.text)
+        self.logger.debug(r.text)
+        return payload
+
     def get_network_params(self) -> dict:
         """Returns the set of network parameters for the current epoch."""
         url = f"{self.wallet_url}v2/network/parameters"
+        self.logger.debug(f"URL: {url}")
+        r = requests.get(url)
+        if not r.ok:
+            self.logger.error(f"Bad status code received: {r.status_code}, {r.text}")
+            return {}
+        payload = json.loads(r.text)
+        self.logger.debug(r.text)
+        return payload
+
+    def get_latest_block_header(self) -> dict:
+        """Returns the latest block header available at the chain source"""
+        url = f"{self.wallet_url}v2/blocks/latest/header"
         self.logger.debug(f"URL: {url}")
         r = requests.get(url)
         if not r.ok:
@@ -659,6 +720,42 @@ class WalletHTTP:
             "Accept": "application/json",
         }
         payload = {"transaction": tx}
+        r = requests.post(url, json=payload, headers=headers)
+        if not r.ok:
+            self.logger.error(f"Bad status code received: {r.status_code}, {r.text}")
+            return {}
+        payload = json.loads(r.text)
+        self.logger.debug(r.text)
+        return payload
+
+    def create_migration_plan(self, wallet_id: str, dest_addresses: list) -> dict:
+        """Creates a plan for migrating the full UTxO balance from the specified wallet to another wallet."""
+        self.logger.info(f"Creating migration plan for wallet ID {wallet_id}")
+        url = f"{self.wallet_url}v2/wallets/{wallet_id}/migrations/plan"
+        self.logger.debug(f"URL: {url}")
+        headers = {
+            "Content-type": "application/json",
+            "Accept": "application/json",
+        }
+        payload = {"addresses": dest_addresses}
+        r = requests.post(url, json=payload, headers=headers)
+        if not r.ok:
+            self.logger.error(f"Bad status code received: {r.status_code}, {r.text}")
+            return {}
+        payload = json.loads(r.text)
+        self.logger.debug(r.text)
+        return payload
+
+    def migrate_wallet(self, wallet_id: str, passphrase: str, dest_addresses: list) -> dict:
+        """Migrates the full UTxO balance from the specified wallet to another wallet."""
+        self.logger.info(f"Migrating wallet ID {wallet_id}")
+        url = f"{self.wallet_url}v2/wallets/{wallet_id}/migrations"
+        self.logger.debug(f"URL: {url}")
+        headers = {
+            "Content-type": "application/json",
+            "Accept": "application/json",
+        }
+        payload = {"passphrase": passphrase, "addresses": dest_addresses}
         r = requests.post(url, json=payload, headers=headers)
         if not r.ok:
             self.logger.error(f"Bad status code received: {r.status_code}, {r.text}")
