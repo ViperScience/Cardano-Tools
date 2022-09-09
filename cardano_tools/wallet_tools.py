@@ -1,12 +1,13 @@
-from collections import namedtuple
-from pathlib import Path
-import subprocess
-import requests
+import json
 import logging
 import shlex
-import pexpect
-import json
+import subprocess
 import time
+from collections import namedtuple
+from pathlib import Path
+
+import pexpect
+import requests
 
 # Cardano-Tools components
 from .utils import minimum_utxo
@@ -260,6 +261,17 @@ class WalletHTTP:
         self.logger.debug(r.text)
         return payload
 
+    def forget_transaction(self, wallet_id: str, tx_id: str) -> None:
+        """Attempt to forget a pending transaction."""
+        self.logger.info(f"Forgetting transaction {tx_id}")
+        url = f"{self.wallet_url}v2/wallets/{wallet_id}/transactions/{tx_id}"
+        self.logger.debug(f"URL: {url}")
+        r = requests.get(url)
+        if not r.ok:
+            self.logger.error(f"Bad status code received: {r.status_code}, {r.text}")
+            return {}
+        return
+
     def confirm_tx(
         self, wallet_id: str, tx_id: str, timeout: float = 600, pause: float = 5
     ) -> bool:
@@ -335,7 +347,6 @@ class WalletHTTP:
             return {}
         payload = json.loads(r.text)
         return payload
-
 
     def send_lovelace(
         self,
@@ -478,7 +489,6 @@ class WalletHTTP:
             }
         ]
         """
-
         for payment in payments:
             # Make sure we send at least the minimum lovelace amount
             assets = payment.get("assets")
@@ -515,6 +525,146 @@ class WalletHTTP:
             tx_id = payload.get("id")
             self.confirm_tx(wallet_id, tx_id)
             return self.get_transacton(wallet_id, tx_id)
+        return payload
+
+    def construct_transaction(self, wallet_id: str, payload: dict) -> dict:
+        """Create a transaction to be signed from the wallet.
+        For simple transactions, you can use the send_ada or send_lovelace functions.
+        This function provides the ability to send batch transactions of ADA and tokens,
+        as well as minting/burning tokens, and stake delegation. See cardano-wallet API for
+        more information.
+
+        Expects a payload dict of the following format:
+
+        {
+          "payments": [
+            {
+              "address": "addr1sjck9mdmfyhzvjhydcjllgj9vjvl522w0573ncustrrr2rg7h9azg4cyqd36yyd48t5ut72hgld0fg2xfvz82xgwh7wal6g2xt8n996s3xvu5g",
+              "amount": {
+                "quantity": 42000000,
+                "unit": "lovelace"
+              },
+              "assets": [
+                {
+                  "policy_id": "65ab82542b0ca20391caaf66a4d4d7897d281f9c136cd3513136945b",
+                  "asset_name": "",
+                  "quantity": 0
+                }
+              ]
+            }
+          ],
+          "withdrawal": "self",
+          "metadata": {
+            "0": {
+              "string": "cardano"
+            },
+              "int": 14
+            "1": {
+              "bytes": "2512a00e9653fe49a44a5886202e24d77eeb998f"
+            }
+          },
+          "mint_burn": [
+            {
+              "policy_script_template": "string",
+              "asset_name": "",
+              "operation": {
+                "mint": {
+                  "receiving_address": "addr1sjck9mdmfyhzvjhydcjllgj9vjvl522w0573ncustrrr2rg7h9azg4cyqd36yyd48t5ut72hgld0fg2xfvz82xgwh7wal6g2xt8n996s3xvu5g",
+                  "quantity": 0
+                }
+              }
+            }
+          ],
+          "delegations": [
+            {
+              "join": {
+                "pool": "pool1wqaz0q0zhtxlgn0ewssevn2mrtm30fgh2g7hr7z9rj5856457mm",
+                "stake_key_index": "1852H"
+              }
+            }
+          ],
+          "validity_interval": {
+            "invalid_before": {
+              "quantity": 10,
+              "unit": "second"
+            },
+            "invalid_hereafter": {
+              "quantity": 10,
+              "unit": "second"
+            }
+          },
+          "encoding": "base16"
+        }
+        """
+        self.logger.info(f"Constructing new transaction for wallet {wallet_id}")
+        url = f"{self.wallet_url}v2/wallets/{wallet_id}/transactions-construct"
+        self.logger.debug(f"URL: {url}")
+        headers = {
+            "Content-type": "application/json",
+            "Accept": "application/json",
+        }
+        self.logger.debug(f"Constructing transaction with the following payload: {payload}")
+        r = requests.post(url, json=payload, headers=headers)
+        if not r.ok:
+            self.logger.error(f"Bad status code received: {r.status_code}, {r.text}")
+            return {}
+        payload = json.loads(r.text)
+        self.logger.debug(r.text)
+        return payload
+
+    def sign_transaction(self, wallet_id: str, passphrase: str, tx: str) -> dict:
+        """Sign a serialized transaction (i.e. output of construct_transaction).
+        Returns the signed transaction."""
+        self.logger.info(f"Signing serialized transaction for wallet ID {wallet_id}")
+        url = f"{self.wallet_url}v2/wallets/{wallet_id}/transactions-sign"
+        self.logger.debug(f"URL: {url}")
+        headers = {
+            "Content-type": "application/json",
+            "Accept": "application/json",
+        }
+        payload = {"passphrase": passphrase, "transaction": tx}
+        r = requests.post(url, json=payload, headers=headers)
+        if not r.ok:
+            self.logger.error(f"Bad status code received: {r.status_code}, {r.text}")
+            return {}
+        payload = json.loads(r.text)
+        self.logger.debug(r.text)
+        return payload
+
+    def decode_transaction(self, wallet_id: str, tx: str) -> dict:
+        """Decode a serialized transaction (e.g. output of construct_transaction)."""
+        self.logger.info(f"Decoding serialized transaction for wallet ID {wallet_id}")
+        url = f"{self.wallet_url}v2/wallets/{wallet_id}/transactions-decode"
+        self.logger.debug(f"URL: {url}")
+        headers = {
+            "Content-type": "application/json",
+            "Accept": "application/json",
+        }
+        payload = {"transaction": tx}
+        r = requests.post(url, json=payload, headers=headers)
+        if not r.ok:
+            self.logger.error(f"Bad status code received: {r.status_code}, {r.text}")
+            return {}
+        payload = json.loads(r.text)
+        self.logger.debug(r.text)
+        return payload
+
+    def submit_transaction(self, wallet_id: str, tx: str) -> dict:
+        """Submit a signed, serialized transaction (e.g. output of sign_transaction)."""
+        self.logger.info(f"Submitting transaction for wallet ID {wallet_id}")
+        url = f"{self.wallet_url}v2/wallets/{wallet_id}/transactions-submit"
+        self.logger.debug(f"URL: {url}")
+        headers = {
+            "Content-type": "application/json",
+            "Accept": "application/json",
+        }
+        payload = {"transaction": tx}
+        r = requests.post(url, json=payload, headers=headers)
+        if not r.ok:
+            self.logger.error(f"Bad status code received: {r.status_code}, {r.text}")
+            return {}
+        payload = json.loads(r.text)
+        self.logger.debug(r.text)
         return payload
 
 
@@ -689,7 +839,6 @@ class WalletCLI:
         res = self.run_cli(f"wallet utxo-snapshot --port {self.port} {wallet_id}")
         if res:
             return json.loads(res.stdout)
-
 
 
 if __name__ == "__main__":

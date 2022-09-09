@@ -1,6 +1,7 @@
+import json
 import logging
-import time
 import math
+import time
 
 from cardano_tools import WalletCLI, WalletHTTP
 
@@ -112,14 +113,52 @@ def wallet_demo(
     estimated_fee = cw_api.estimate_tx_fee(w1_id, w2_a1, 10_000_000)
     print(f"Estimated transaction fee for sending 10 ADA: {estimated_fee}")
 
-    print(f"Sending 10 ADA from {wallet1_name} to {wallet2_name}...")
-    cw_api.send_ada(w1_id, w2_a1, 10, default_passphrase, wait=True)
-    w1_new_balance = cw_api.get_balance(w1_id)[0].get("quantity") / 1_000_000
-    w2_new_balance = cw_api.get_balance(w2_id)[0].get("quantity") / 1_000_000
-    print(f"{wallet1_name} new balance: {w1_new_balance}")
-    print(f"{wallet2_name} new balance: {w2_new_balance}")
+    # print(f"Sending 10 ADA from {wallet1_name} to {wallet2_name}...")
+    # cw_api.send_ada(w1_id, w2_a1, 10, default_passphrase, wait=True)
+    # w1_new_balance = cw_api.get_balance(w1_id)[0].get("quantity") / 1_000_000
+    # w2_new_balance = cw_api.get_balance(w2_id)[0].get("quantity") / 1_000_000
+    # print(f"{wallet1_name} new balance: {w1_new_balance}")
+    # print(f"{wallet2_name} new balance: {w2_new_balance}")
+    # print("")
+
+    print(f"Constructing transaction for {wallet1_name}...")
+    payload = json.loads(
+        f"""{{
+            "payments": [
+                {{
+                    "address": "{w2_a1}",
+                    "amount": {{
+                        "quantity": 1000000,
+                        "unit": "lovelace"
+                    }}
+                }}
+            ],
+            "withdrawal": "self",
+            "validity_interval": {{
+                "invalid_hereafter": {{
+                    "quantity": 3600,
+                    "unit": "second"
+                }}
+            }},
+            "encoding": "base16"
+        }}"""
+    )
+    tx = cw_api.construct_transaction(w1_id, payload)
+    encoded_tx = tx.get("transaction")
+    print(f"Constructed payload: {tx}")
     print("")
 
+    signed_tx = cw_api.sign_transaction(w1_id, default_passphrase, encoded_tx)
+    print(f"Signed transaction: {signed_tx}")
+    print("")
+
+    decoded_tx = cw_api.decode_transaction(w1_id, signed_tx.get("transaction"))
+    print(f"Decoded transaction: {decoded_tx}")
+    print("")
+
+    print(f"Submitting transaction...")
+    tx_output = cw_api.submit_transaction(w1_id, signed_tx.get("transaction"))
+    print("")
 
     print(f"{wallet1_name} UTxO stats:")
     print(f"\t{cw_api.get_utxo_stats(w1_id)}")
@@ -130,7 +169,9 @@ def wallet_demo(
     print("")
 
     w1_txs = cw_api.get_transactions(w1_id)
-    print(f"{wallet1_name} first transaction: {w1_txs[0]}")
+    w1_tx0 = w1_txs[0]
+    print(f"{wallet1_name} has {len(w1_txs)} total transactions.")
+    print(f"{wallet1_name} first transaction: {w1_tx0}")
     print("")
 
     print(f"Network parameters: {cw_api.get_network_params()}")
