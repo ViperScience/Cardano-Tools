@@ -931,6 +931,64 @@ class WalletHTTP:
         self.logger.debug(r.text)
         return payload
 
+    def create_policy_id(self, wallet_id: str, policy_script_template: dict) -> dict:
+        """Create a new policy ID for the wallet. See cardano-wallet documentation for specifics about the policy_script_template format.
+        To create a policy signed by only this wallet, you can simply provide the string 'cosigner#0'.
+
+        Note: 'cosigner#0' stands for our wallet’s policy key. In case of Shelley wallet we have only one. In the future, in the Shared
+        wallets, we’ll be able to construct a minting/burning script with many policy keys shared between different users and they will
+        be identified as 'cosigner#1', 'cosigner#2', etc"""
+        self.logger.debug(f"Creating policy ID for wallet {wallet_id}")
+        url = f"{self.wallet_url}v2/wallets/{wallet_id}/policy-id"
+        self.logger.debug(f"URL: {url}")
+        headers = {
+            "Content-type": "application/json",
+            "Accept": "application/json",
+        }
+        payload = {"policy_script_template": policy_script_template}
+        r = requests.post(url, json=payload, headers=headers)
+        if not r.ok:
+            self.logger.error(f"Bad status code received: {r.status_code}, {r.text}")
+        payload = json.loads(r.text)
+        self.logger.debug(r.text)
+        return payload
+
+    def create_policy_key(
+        self,
+        wallet_id: str,
+        passphrase: str,
+        hash_format: bool = False,
+    ) -> dict:
+        """Create policy key for the wallet. hash_format = True returns a hash of the key instead."""
+        self.logger.info(f"Creating policy key for wallet {wallet_id}")
+        url = f"{self.wallet_url}v2/wallets/{wallet_id}/policy-key?hash={hash_format}"
+        self.logger.debug(f"URL: {url}")
+        headers = {
+            "Content-type": "application/json",
+            "Accept": "application/json",
+        }
+        payload = {"passphrase": passphrase}
+        r = requests.post(url, json=payload, headers=headers)
+        if not r.ok:
+            self.logger.error(f"Bad status code received: {r.status_code}, {r.text}")
+        payload = json.loads(r.text)
+        self.logger.debug(r.text)
+        return payload
+
+    def get_policy_key(self, wallet_id: str, hash_format: bool = False) -> dict:
+        """Get policy key for derivation index 0. hash_format = True returns a hash of the
+        key instead."""
+        self.logger.debug(f"Retrieving policy key for wallet {wallet_id}")
+        url = f"{self.wallet_url}v2/wallets/{wallet_id}/policy-key?hash={hash_format}"
+        self.logger.debug(f"URL: {url}")
+        r = requests.get(url)
+        if not r.ok:
+            self.logger.error(f"Bad status code received: {r.status_code}, {r.text}")
+            return {}
+        payload = json.loads(r.text)
+        self.logger.debug(r.text)
+        return payload
+
 
 class WalletCLI:
     """We recommend using the WalletHTTP class over this CLI class"""
