@@ -39,18 +39,15 @@ class WalletHTTP:
         self.logger.debug(r.text)
         return payload
 
-    def update_settings(self, smash_source: str) -> dict:
+    def update_settings(self, smash_source: str) -> None:
         """Updates wallet server settings. Currently, the only setting is SMASH server URL"""
         url = f"{self.wallet_url}v2/settings"
         headers = {"Content-type": "application/json"}
-        payload = {"pool_metadata_source": smash_source}
+        payload = {"settings": {"pool_metadata_source": "direct"}}
         r = requests.put(url, headers=headers, json=payload)
         if not r.ok:
             self.logger.error(f"Bad status code received: {r.status_code}, {r.text}")
-            return {}
-        payload = json.loads(r.text)
-        self.logger.debug(r.text)
-        return payload
+        return
 
     def get_smash_health(self) -> dict:
         """Get health status of currently active SMASH server"""

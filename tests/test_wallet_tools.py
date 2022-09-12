@@ -75,9 +75,21 @@ wallet_running = pytest.mark.skipif(
     reason="Requires cardano-wallet to be running",
 )
 
+import pdb
+
 
 @wallet_running
 class TestWalletTools:
-    def test_stub(wallets_have_balance, era, is_testnet):
+    def test_stub(self, wallets_have_balance, era, is_testnet):
         assert wallets_have_balance
         assert is_testnet
+
+    def test_get_settings(self, http_api):
+        settings = http_api.get_settings()
+        assert settings.get("pool_metadata_source")
+
+    def test_update_settings(self, http_api):
+        smash_source = "direct"
+        http_api.update_settings(smash_source)
+        new_settings = http_api.get_settings()
+        assert new_settings.get("pool_metadata_source") == smash_source
