@@ -19,24 +19,54 @@ def cli_api() -> WalletCLI:
 
 
 @pytest.fixture
-def wallets(http_api) -> tuple:
-    """Test wallet #1"""
-    w1_seed = "fragile pottery wolf snack wet dolphin wish guard step track second rally panda desk because hollow route carpet ghost worry address ecology frown join"
-    w1_name = "TestWallet1"
-    w2_seed = "evoke pull giraffe enhance beach ripple alien pottery beach bubble rail hold finish slice power parade brief rough fame type hungry guilt tail cabbage"
-    w2_name = "TestWallet2"
-    passphrase = "$3cur3p@$$ph@$3"
+def passphrase() -> str:
+    return "$3cur3p@$$ph@$3"
 
+
+@pytest.fixture
+def w1_seed() -> str:
+    return "fragile pottery wolf snack wet dolphin wish guard step track second rally panda desk because hollow route carpet ghost worry address ecology frown join"
+
+
+@pytest.fixture
+def w1_name() -> str:
+    return "TestWallet1"
+
+
+@pytest.fixture
+def w2_seed() -> str:
+    return "evoke pull giraffe enhance beach ripple alien pottery beach bubble rail hold finish slice power parade brief rough fame type hungry guilt tail cabbage"
+
+
+@pytest.fixture
+def w2_name() -> str:
+    return "TestWallet2"
+
+
+@pytest.fixture
+def wallet1(http_api, passphrase, w1_seed, w1_name) -> dict:
     # Restore test wallets if they don't already exist
     if not http_api.get_wallet_by_name(w1_name):
-        print(f"Creating wallet: {w1_name}")
         http_api.create_wallet(w1_name, w1_seed.split(" "), passphrase)
+    return http_api.get_wallet_by_name(w1_name)
 
+
+@pytest.fixture
+def w1_id(wallet1) -> str:
+    return wallet1.get("id")
+
+
+@pytest.fixture
+def wallet2(http_api, passphrase, w2_seed, w2_name) -> dict:
+    # Restore test wallets if they don't already exist
     if not http_api.get_wallet_by_name(w2_name):
-        print(f"Creating wallet: {w2_name}")
         http_api.create_wallet(w2_name, w2_seed.split(" "), passphrase)
+    return http_api.get_wallet_by_name(w2_name)
 
-    return http_api.get_wallet_by_name(w1_name), http_api.get_wallet_by_name(w2_name)
+
+@pytest.fixture
+def w2_id(wallet2) -> str:
+    return wallet2.get("id")
 
 
 @pytest.fixture
@@ -53,10 +83,10 @@ def era(http_api) -> str:
 
 
 @pytest.fixture
-def wallets_have_balance(wallets) -> bool:
+def wallets_have_balance(wallet1, wallet2) -> bool:
     if (
-        wallets[0].get("balance").get("total").get("quantity") > 10
-        and wallets[1].get("balance").get("total").get("quantity") > 10
+        wallet1.get("balance").get("total").get("quantity") > 10
+        and wallet2.get("balance").get("total").get("quantity") > 10
     ):
         return True
     return False
@@ -82,29 +112,42 @@ import pdb
 @wallet_running
 class TestWalletTools:
     # Wallets tests
-    def test_create_wallet(self, http_api):
-        pytest.skip()
+    def test_create_wallet(self, wallet1, w1_name, wallet2, w2_name):
+        # We've already tested this function in the fixture
+        assert wallet1.get("name") == w1_name
+        assert wallet2.get("name") == w2_name
 
     def test_create_wallet_from_key(self, http_api):
         pytest.skip()
 
-    def test_rename_wallet(self, http_api):
-        pytest.skip()
+    def test_rename_wallet(self, http_api, wallet1, w1_name, w1_id):
+        new_name = "Changed Name"
+        updated_w1 = http_api.rename_wallet(w1_id, new_name)
+        assert updated_w1.get("name") == new_name
+        # Change back to old name
+        updated_w1 = http_api.rename_wallet(w1_id, w1_name)
 
-    def test_update_passphrase(self, http_api):
-        pytest.skip()
+    def test_update_passphrase(self, http_api, passphrase, w1_id):
+        new_passphrase = "This Is A New Passphrase 12345"
+        updated_w1 = http_api.update_passphrase(w1_id, passphrase, new_passphrase)
+        assert updated_w1
+        # Change back to original passphrase
+        updated_w1 = http_api.update_passphrase(w1_id, new_passphrase, passphrase)
 
-    def test_delete_wallet(self, http_api):
-        pytest.skip()
+    def test_delete_wallet(self, http_api, w1_id):
+        http_api.delete_wallet(w1_id)
+        assert http_api.get_wallet(w1_id) == {}
 
     def test_get_all_wallets(self, http_api):
         pytest.skip()
 
-    def test_get_wallet(self, http_api):
-        pytest.skip()
+    def test_get_wallet(self, http_api, wallet1, w1_id):
+        w1_by_id = http_api.get_wallet(w1_id)
+        assert w1_by_id.get("id") == w1_id
 
-    def test_get_wallet_by_name(self, http_api):
-        pytest.skip()
+    def test_get_wallet_by_name(self, http_api, wallet1, w1_name):
+        w1_by_name = http_api.get_wallet_by_name(w1_name)
+        assert w1_by_name == wallet1
 
     def test_get_balance(self, http_api):
         pytest.skip()
