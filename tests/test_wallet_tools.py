@@ -19,6 +19,11 @@ def cli_api() -> WalletCLI:
 
 
 @pytest.fixture
+def new_mnemonic(cli_api):
+    return cli_api.recovery_phrase_generate()
+
+
+@pytest.fixture
 def passphrase() -> str:
     return "$3cur3p@$$ph@$3"
 
@@ -134,9 +139,13 @@ class TestWalletTools:
         # Change back to original passphrase
         updated_w1 = http_api.update_passphrase(w1_id, new_passphrase, passphrase)
 
-    def test_delete_wallet(self, http_api, w1_id):
-        http_api.delete_wallet(w1_id)
-        assert http_api.get_wallet(w1_id) == {}
+    def test_delete_wallet(self, http_api, new_mnemonic, w1_id):
+        # Create a new wallet for us to delete
+        http_api.create_wallet("TempWallet", new_mnemonic.split(" "), "passphrase")
+        temp_wallet = http_api.get_wallet_by_name("TempWallet")
+        assert temp_wallet.get("id") != {}
+        http_api.delete_wallet(temp_wallet.get("id"))
+        assert http_api.get_wallet(temp_wallet.get("id")) == {}
 
     def test_get_all_wallets(self, http_api):
         pytest.skip()
