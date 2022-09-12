@@ -804,6 +804,36 @@ class WalletHTTP:
         self.logger.debug(r.text)
         return payload
 
+    def pool_maintenance_actions(self) -> dict:
+        """View the status of stake pool maintenance actions for the local node"""
+        self.logger.debug(f"Viewing stake pool maintenance actions.")
+        url = f"{self.wallet_url}v2/stake-pools/maintenance-actions"
+        self.logger.debug(f"URL: {url}")
+        r = requests.get(url)
+        if not r.ok:
+            self.logger.error(f"Bad status code received: {r.status_code}, {r.text}")
+            return {}
+        payload = json.loads(r.text)
+        self.logger.debug(r.text)
+        return payload
+
+    def trigger_pool_maintenance(self, action: str) -> None:
+        """Performs maintenance actions on stake pools for the local node
+        (e.g. based on the output of pool_maintenance_actions)"""
+        self.logger.info(f"Performing stake pool maintenance action: {action}")
+        url = f"{self.wallet_url}v2/stake-pools/maintenance-actions"
+        self.logger.debug(f"URL: {url}")
+        headers = {
+            "Content-type": "application/json",
+            "Accept": "application/json",
+        }
+        payload = {"maintenance_action": action}
+        r = requests.post(url, json=payload, headers=headers)
+        if not r.ok:
+            self.logger.error(f"Bad status code received: {r.status_code}, {r.text}")
+            return {}
+        return
+
 
 class WalletCLI:
     """We recommend using the WalletHTTP class over this CLI class"""

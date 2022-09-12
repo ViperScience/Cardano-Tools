@@ -196,6 +196,11 @@ def wallet_demo(
     print(f"First pool in list: {stake_pools[0]}")
     print("")
 
+    print(f"Pool maintenance actions: {cw_api.pool_maintenance_actions()}")
+    print(f"Forcing stake pool garbage collection...")
+    cw_api.trigger_pool_maintenance("gc_stake_pools")
+    print("")
+
     if cleanup:
         print("Deleting wallets")
         cw_api.delete_wallet(w1_id)
