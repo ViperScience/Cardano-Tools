@@ -194,6 +194,12 @@ def wallet_demo(
     stake_pools = cw_api.list_stake_pools(int(w1_ada_balance * 1e6))
     print(f"{len(stake_pools)} total stake pools.")
     print(f"First pool in list: {stake_pools[0]}")
+    pool_id = stake_pools[0].get("id")
+    print(f"Delegating {wallet1_name} to stake pool {pool_id}...")
+    cw_api.join_stake_pool(w1_id, default_passphrase, pool_id)
+    time.sleep(10)
+    print(f"Undelegating {wallet1_name}...")
+    cw_api.quit_staking(w1_id, default_passphrase)
     print("")
 
     print(f"Pool maintenance actions: {cw_api.pool_maintenance_actions()}")

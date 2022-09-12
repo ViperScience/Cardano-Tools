@@ -831,8 +831,53 @@ class WalletHTTP:
         r = requests.post(url, json=payload, headers=headers)
         if not r.ok:
             self.logger.error(f"Bad status code received: {r.status_code}, {r.text}")
-            return {}
         return
+
+    def estimate_delegation_fee(self, wallet_id: str) -> dict:
+        """Estimate fee for joining or leaving a stake pool."""
+        self.logger.debug(f"Estimating delegation fee for wallet {wallet_id}")
+        url = f"{self.wallet_url}v2/wallets/{wallet_id}/delegation-fees"
+        self.logger.debug(f"URL: {url}")
+        r = requests.get(url)
+        if not r.ok:
+            self.logger.error(f"Bad status code received: {r.status_code}, {r.text}")
+            return {}
+        payload = json.loads(r.text)
+        self.logger.debug(r.text)
+        return payload
+
+    def join_stake_pool(self, wallet_id: str, passphrase: str, pool_id: str) -> None:
+        """Delegate all addresses from the given wallet to the given stake pool"""
+        self.logger.debug(f"Delegating wallet {wallet_id} to stake pool {pool_id}")
+        url = f"{self.wallet_url}v2/stake-pools/{pool_id}/wallets/{wallet_id}"
+        self.logger.debug(f"URL: {url}")
+        headers = {
+            "Content-type": "application/json",
+            "Accept": "application/json",
+        }
+        payload = {"passphrase": passphrase}
+        r = requests.put(url, json=payload, headers=headers)
+        if not r.ok:
+            self.logger.error(f"Bad status code received: {r.status_code}, {r.text}")
+        return
+
+    def quit_staking(self, wallet_id: str, passphrase: str) -> dict:
+        """Stop delegating completely. The wallet's stake will become inactive and
+        rewards will be withdrawn automatically"""
+        self.logger.debug(f"Stopping delegation for wallet {wallet_id}")
+        url = f"{self.wallet_url}v2/stake-pools/*/wallets/{wallet_id}"
+        self.logger.debug(f"URL: {url}")
+        headers = {
+            "Content-type": "application/json",
+            "Accept": "application/json",
+        }
+        payload = {"passphrase": passphrase}
+        r = requests.delete(url, json=payload, headers=headers)
+        if not r.ok:
+            self.logger.error(f"Bad status code received: {r.status_code}, {r.text}")
+        payload = json.loads(r.text)
+        self.logger.debug(r.text)
+        return payload
 
 
 class WalletCLI:
