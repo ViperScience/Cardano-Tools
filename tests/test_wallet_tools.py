@@ -148,7 +148,8 @@ class TestWalletTools:
         assert http_api.get_wallet(temp_wallet.get("id")) == {}
 
     def test_get_all_wallets(self, http_api):
-        pytest.skip()
+        wallets = http_api.get_all_wallets()
+        assert len(wallets) >= 2
 
     def test_get_wallet(self, http_api, wallet1, w1_id):
         w1_by_id = http_api.get_wallet(w1_id)
@@ -158,14 +159,19 @@ class TestWalletTools:
         w1_by_name = http_api.get_wallet_by_name(w1_name)
         assert w1_by_name == wallet1
 
-    def test_get_balance(self, http_api):
-        pytest.skip()
+    def test_get_balance(self, http_api, w1_id):
+        lovelace_balance_dict, token_balance = http_api.get_balance(w1_id)
+        ada_balance = lovelace_balance_dict.get("quantity") / 1e6
+        assert isinstance(ada_balance, float)
+        assert isinstance(token_balance, list)
 
-    def test_get_utxo_stats(self, http_api):
-        pytest.skip()
+    def test_get_utxo_stats(self, http_api, w1_id):
+        stats = http_api.get_utxo_stats(w1_id)
+        assert stats.get("distribution")
 
-    def test_get_utxo_snapshot(self, http_api):
-        pytest.skip()
+    def test_get_utxo_snapshot(self, http_api, w1_id):
+        snapshot = http_api.get_utxo_snapshot(w1_id)
+        assert snapshot.get("entries")
 
     # Assets tests
     def test_get_assets(self, http_api):
