@@ -80,10 +80,6 @@ import pdb
 
 @wallet_running
 class TestWalletTools:
-    def test_stub(self, wallets_have_balance, era, is_testnet):
-        assert wallets_have_balance
-        assert is_testnet
-
     def test_get_settings(self, http_api):
         settings = http_api.get_settings()
         assert settings.get("pool_metadata_source")
@@ -93,3 +89,19 @@ class TestWalletTools:
         http_api.update_settings(smash_source)
         new_settings = http_api.get_settings()
         assert new_settings.get("pool_metadata_source") == smash_source
+
+    def test_get_smash_health(self, http_api):
+        health = http_api.get_smash_health()
+        assert health.get("health")
+
+    def test_get_network_info(self, http_api):
+        info = http_api.get_network_info()
+        assert info.get("network_info")
+
+    def test_get_network_clock(self, http_api):
+        clock = http_api.get_network_clock()
+        assert clock.get("status")
+
+    def test_get_network_params(self, http_api):
+        params = http_api.get_network_params()
+        assert params.get("genesis_block_hash")
