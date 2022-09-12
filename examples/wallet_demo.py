@@ -110,8 +110,8 @@ def wallet_demo(
     print(f"Address inspect: {cw_api.inspect_address(w2_a1)}")
     print("")
 
-    estimated_fee = cw_api.estimate_tx_fee(w1_id, w2_a1, 10_000_000)
-    print(f"Estimated transaction fee for sending 10 ADA: {estimated_fee}")
+    # estimated_fee = cw_api.estimate_tx_fee(w1_id, w2_a1, 10_000_000)
+    # print(f"Estimated transaction fee for sending 10 ADA: {estimated_fee}")
 
     # print(f"Sending 10 ADA from {wallet1_name} to {wallet2_name}...")
     # cw_api.send_ada(w1_id, w2_a1, 10, default_passphrase, wait=True)
@@ -186,6 +186,14 @@ def wallet_demo(
     print("")
 
     print(f"Network clock: {cw_api.get_network_clock()}")
+    print("")
+
+    print(f"{wallet1_name} stake keys: {cw_api.list_stake_keys(w1_id)}")
+    print("")
+
+    stake_pools = cw_api.list_stake_pools(int(w1_ada_balance * 1e6))
+    print(f"{len(stake_pools)} total stake pools.")
+    print(f"First pool in list: {stake_pools[0]}")
     print("")
 
     if cleanup:

@@ -776,6 +776,34 @@ class WalletHTTP:
         self.logger.debug(r.text)
         return payload
 
+    def list_stake_keys(self, wallet_id: str) -> dict:
+        """List stake keys relevant to the wallet, and how much ada is associated with each."""
+        self.logger.debug(f"Listing stake keys for wallet ID {wallet_id}")
+        url = f"{self.wallet_url}v2/wallets/{wallet_id}/stake-keys"
+        self.logger.debug(f"URL: {url}")
+        r = requests.get(url)
+        if not r.ok:
+            self.logger.error(f"Bad status code received: {r.status_code}, {r.text}")
+            return {}
+        payload = json.loads(r.text)
+        self.logger.debug(r.text)
+        return payload
+
+    def list_stake_pools(self, lovelace_to_stake: int) -> dict:
+        """List all known stake pools, ordered by descending non_myopic_member_rewards"""
+        self.logger.debug(
+            f"Listing stake pools, ordered for stake amount of {lovelace_to_stake} lovelace"
+        )
+        url = f"{self.wallet_url}v2/stake-pools?stake={lovelace_to_stake}"
+        self.logger.debug(f"URL: {url}")
+        r = requests.get(url)
+        if not r.ok:
+            self.logger.error(f"Bad status code received: {r.status_code}, {r.text}")
+            return {}
+        payload = json.loads(r.text)
+        self.logger.debug(r.text)
+        return payload
+
 
 class WalletCLI:
     """We recommend using the WalletHTTP class over this CLI class"""
