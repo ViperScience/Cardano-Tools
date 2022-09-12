@@ -188,6 +188,14 @@ def wallet_demo(
     print(f"Network clock: {cw_api.get_network_clock()}")
     print("")
 
+    acct_pubkey = cw_api.create_account_public_key(w1_id, "1852H", default_passphrase)
+    print(f"Derived account public key for index 1852H: {acct_pubkey}")
+    acct_pubkeys = cw_api.get_account_public_key(w1_id)
+    print(f"Retrieved account public keys: {acct_pubkeys}")
+    utxo_soft_key = cw_api.get_public_key(w1_id, "utxo_external", "0")
+    print(f"UTxO external public key: {utxo_soft_key}")
+    print("")
+
     print(f"{wallet1_name} stake keys: {cw_api.list_stake_keys(w1_id)}")
     print("")
 

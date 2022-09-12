@@ -879,6 +879,58 @@ class WalletHTTP:
         self.logger.debug(r.text)
         return payload
 
+    def create_account_public_key(
+        self,
+        wallet_id: str,
+        index: str,
+        passphrase: str,
+        format: str = "non_extended",
+        purpose: str = "1852H",
+    ) -> dict:
+        """Derive an account public key for any account index. For this key
+        derivation to be possible, the wallet must have been created from mnemonic."""
+        self.logger.info(f"Deriving account public key for wallet {wallet_id}")
+        url = f"{self.wallet_url}v2/wallets/{wallet_id}/keys/{index}"
+        self.logger.debug(f"URL: {url}")
+        headers = {
+            "Content-type": "application/json",
+            "Accept": "application/json",
+        }
+        payload = {"passphrase": passphrase, "format": format, "purpose": purpose}
+        r = requests.post(url, json=payload, headers=headers)
+        if not r.ok:
+            self.logger.error(f"Bad status code received: {r.status_code}, {r.text}")
+        payload = json.loads(r.text)
+        self.logger.debug(r.text)
+        return payload
+
+    def get_account_public_key(self, wallet_id: str) -> dict:
+        """Retrieve the account public key of this wallet"""
+        self.logger.debug(f"Retrieving account public key for wallet {wallet_id}")
+        url = f"{self.wallet_url}v2/wallets/{wallet_id}/keys"
+        self.logger.debug(f"URL: {url}")
+        r = requests.get(url)
+        if not r.ok:
+            self.logger.error(f"Bad status code received: {r.status_code}, {r.text}")
+            return {}
+        payload = json.loads(r.text)
+        self.logger.debug(r.text)
+        return payload
+
+    def get_public_key(self, wallet_id: str, role: str, index: str) -> dict:
+        """Retrieve the public key for the given role and derivation index of this wallet.
+        Options for role are: utxo_external, utxo_internal, or mutable_account."""
+        self.logger.debug(f"Retrieving public key for wallet {wallet_id}")
+        url = f"{self.wallet_url}v2/wallets/{wallet_id}/keys/{role}/{index}"
+        self.logger.debug(f"URL: {url}")
+        r = requests.get(url)
+        if not r.ok:
+            self.logger.error(f"Bad status code received: {r.status_code}, {r.text}")
+            return {}
+        payload = json.loads(r.text)
+        self.logger.debug(r.text)
+        return payload
+
 
 class WalletCLI:
     """We recommend using the WalletHTTP class over this CLI class"""
