@@ -5,13 +5,7 @@ import requests
 
 from cardano_tools import WalletCLI, WalletHTTP, wallet_tools
 
-# pytest decorators to specify test requirements
-wallet_running = pytest.mark.skipif(
-    not requests.get("http://localhost:8090/v2/network/information").ok,
-    reason="Requires cardano-wallet running on localhost:8090",
-)
 
-# Test requirements: testnet, wallets, nonzero ADA balance, nonzero token balance
 @pytest.fixture
 def http_api() -> WalletHTTP:
     return WalletHTTP()
@@ -65,6 +59,21 @@ def wallets_have_balance(wallets) -> bool:
     ):
         return True
     return False
+
+
+# Setup a pytest decorator to only run these tests if the host has cardano-wallet running
+def wallet_server_exists():
+    try:
+        requests.get("http://localhost:8090/v2/network/information")
+    except:
+        return False
+    return True
+
+
+wallet_running = pytest.mark.skipif(
+    not wallet_server_exists(),
+    reason="Requires cardano-wallet to be running",
+)
 
 
 @wallet_running
