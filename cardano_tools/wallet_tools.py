@@ -19,7 +19,8 @@ class WalletError(Exception):
 
 class WalletHTTP:
     """While cardano-wallet provides 2 APIs, HTTP and CLI, the HTTP API has more features, so we
-    primarily support HTTP with this library
+    primarily support HTTP with this library. For full specifications on the use of these commands,
+    refer to the cardano-wallet HTTP API documentation: https://input-output-hk.github.io/cardano-wallet/api/edge/
     """
 
     def __init__(self, wallet_server: str = "http://localhost", wallet_server_port: int = 8090):
