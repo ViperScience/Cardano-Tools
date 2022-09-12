@@ -1,9 +1,15 @@
 import os
 
 import pytest
+import requests
 
 from cardano_tools import WalletCLI, WalletHTTP, wallet_tools
 
+# pytest decorators to specify test requirements
+wallet_running = pytest.mark.skipif(
+    not requests.get("http://localhost:8090/v2/network/information").ok,
+    reason="Requires cardano-wallet running on localhost:8090",
+)
 
 # Test requirements: testnet, wallets, nonzero ADA balance, nonzero token balance
 @pytest.fixture
@@ -61,7 +67,8 @@ def wallets_have_balance(wallets) -> bool:
     return False
 
 
-def test_stub(wallets_have_balance, era, is_testnet):
-    assert wallets_have_balance
-    assert is_testnet
-    assert era == "babbage"
+@wallet_running
+class TestWalletTools:
+    def test_stub(wallets_have_balance, era, is_testnet):
+        assert wallets_have_balance
+        assert is_testnet
