@@ -201,23 +201,43 @@ class TestWalletTools:
         assert test_token.get("asset_name") == token.get("asset_name")
 
     # Addresses tests
-    def test_get_addresses(self, http_api):
-        pytest.skip()
+    def test_get_addresses(self, http_api, w1_id):
+        addrs = http_api.get_addresses(w1_id)
+        assert len(addrs) > 0
+        assert isinstance(addrs[0], str)
+        assert addrs[0].startswith("addr")
 
-    def test_inspect_address(self, http_api):
-        pytest.skip()
+    def test_inspect_address(self, http_api, w1_id):
+        addr = http_api.get_addresses(w1_id)[0]
+        inspect = http_api.inspect_address(addr)
+        assert isinstance(inspect.get("spending_key_hash"), str)
+        assert isinstance(inspect.get("address_style"), str)
+        assert isinstance(inspect.get("address_type"), int)
 
-    def test_get_transaction(self, http_api):
-        pytest.skip()
+    def test_get_transaction(self, http_api, w1_id):
+        txs = http_api.get_transactions(w1_id)
+        assert len(txs) > 0
+        assert isinstance(txs[0].get("id"), str)
+        tx = http_api.get_transaction(w1_id, txs[0].get("id"))
+        assert tx == txs[0]
 
-    def test_get_transactions(self, http_api):
-        pytest.skip()
+    def test_get_transactions(self, http_api, w1_id):
+        txs = http_api.get_transactions(w1_id)
+        assert len(txs) > 0
+        assert isinstance(txs[0].get("id"), str)
 
-    def test_forget_transaction(self, http_api):
-        pytest.skip()
+    def test_forget_transaction(self, http_api, w1_id):
+        """Note: This function cannot be tested reliably.
+        forget_transaction tries to forget a pending transaction.
+        For this test, we'll just make sure the function runs on an
+        existing transaction"""
+        tx = http_api.get_transactions(w1_id)[0]
+        http_api.forget_transaction(w1_id, tx.get("id"))
+        assert True
 
-    def test_confirm_tx(self, http_api):
-        pytest.skip()
+    def test_confirm_tx(self, http_api, w1_id):
+        tx = http_api.get_transactions(w1_id)[0]
+        assert http_api.confirm_tx(w1_id, tx.get("id"))
 
     # Transactions tests
     def test_estimate_tx_fee(self, http_api):

@@ -307,7 +307,7 @@ class WalletHTTP:
         payload = json.loads(r.text)
         return payload
 
-    def get_transacton(self, wallet_id: str, tx_id: str) -> dict:
+    def get_transaction(self, wallet_id: str, tx_id: str) -> dict:
         """Pull information about the specified transaction."""
         self.logger.info(f"Querying information for transaction {tx_id}")
         url = f"{self.wallet_url}v2/wallets/{wallet_id}/transactions/{tx_id}"
@@ -340,7 +340,6 @@ class WalletHTTP:
         r = requests.get(url)
         if not r.ok:
             self.logger.error(f"Bad status code received: {r.status_code}, {r.text}")
-            return {}
         return
 
     def confirm_tx(
@@ -349,7 +348,7 @@ class WalletHTTP:
         """Checks the given transaction and waits until it's submitted."""
         start_time = time.time()
         while True:
-            tx_data = self.get_transacton(wallet_id, tx_id)
+            tx_data = self.get_transaction(wallet_id, tx_id)
             self.logger.info(f"TX status: {tx_data.get('status')}")
             if tx_data.get("status") == "in_ledger":
                 return True
