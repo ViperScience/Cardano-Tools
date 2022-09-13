@@ -1,5 +1,6 @@
 import json
 import os
+import pdb
 
 import pytest
 import requests
@@ -88,7 +89,7 @@ def era(http_api) -> str:
 
 
 @pytest.fixture
-def wallets_have_balance(wallet1, wallet2) -> bool:
+def wallets_have_ada(wallet1, wallet2) -> bool:
     if (
         wallet1.get("balance").get("total").get("quantity") > 10
         and wallet2.get("balance").get("total").get("quantity") > 10
@@ -97,7 +98,17 @@ def wallets_have_balance(wallet1, wallet2) -> bool:
     return False
 
 
-# Setup a pytest decorator to only run these tests if the host has cardano-wallet running
+@pytest.fixture
+def wallets_have_tokens(wallet1, wallet2) -> bool:
+    if (
+        len(wallet1.get("assets").get("available")) > 0
+        and len(wallet2.get("assets").get("available")) > 0
+    ):
+        return True
+    return False
+
+
+# Custom pytest decorator to only run these tests if the host has cardano-wallet running
 def wallet_server_exists():
     try:
         requests.get("http://localhost:8090/v2/network/information")
@@ -110,8 +121,6 @@ wallet_running = pytest.mark.skipif(
     not wallet_server_exists(),
     reason="Requires cardano-wallet to be running",
 )
-
-import pdb
 
 
 @wallet_running
@@ -174,11 +183,22 @@ class TestWalletTools:
         assert snapshot.get("entries")
 
     # Assets tests
-    def test_get_assets(self, http_api):
-        pytest.skip()
+    def test_get_assets(self, wallets_have_tokens, http_api, w1_id):
+        if not wallets_have_tokens:
+            pytest.skip(reason="No tokens in test wallets.")
+        for token in http_api.get_assets(w1_id):
+            assert isinstance(token.get("policy_id"), str)
+            assert isinstance(token.get("asset_name"), str)
 
-    def test_get_asset(self, http_api):
-        pytest.skip()
+    def test_get_asset(self, wallets_have_tokens, http_api, w1_id):
+        if not wallets_have_tokens:
+            pytest.skip(reason="No tokens in test wallets.")
+        # Get first token in wallet
+        tokens = http_api.get_assets(w1_id)
+        token = tokens[0]
+        test_token = http_api.get_asset(w1_id, token.get("policy_id"), token.get("asset_name"))
+        assert test_token.get("policy_id") == token.get("policy_id")
+        assert test_token.get("asset_name") == token.get("asset_name")
 
     # Addresses tests
     def test_get_addresses(self, http_api):
