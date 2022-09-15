@@ -454,7 +454,7 @@ class WalletHTTP:
         if wait:
             tx_id = payload.get("id")
             self.confirm_tx(wallet_id, tx_id)
-            return self.get_transacton(wallet_id, tx_id)
+            return self.get_transaction(wallet_id, tx_id)
         return payload
 
     def send_ada(
@@ -531,7 +531,7 @@ class WalletHTTP:
         if wait:
             tx_id = payload.get("id")
             self.confirm_tx(wallet_id, tx_id)
-            return self.get_transacton(wallet_id, tx_id)
+            return self.get_transaction(wallet_id, tx_id)
         return payload
 
     def send_batch_tx(
@@ -594,7 +594,7 @@ class WalletHTTP:
         if wait:
             tx_id = payload.get("id")
             self.confirm_tx(wallet_id, tx_id)
-            return self.get_transacton(wallet_id, tx_id)
+            return self.get_transaction(wallet_id, tx_id)
         return payload
 
     def construct_transaction(self, wallet_id: str, payload: dict) -> dict:
