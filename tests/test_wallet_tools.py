@@ -1,6 +1,7 @@
 import json
 import os
 import pdb
+import time
 
 import pytest
 import requests
@@ -356,44 +357,70 @@ class TestWalletTools:
         assert migration_plan.get("selections")[0].get("outputs")[0].get("address") == addr
 
     # Stake Pools tests
-    def test_list_stake_keys(self, http_api):
-        pytest.skip()
+    def test_list_stake_keys(self, http_api, w1_id):
+        stake_keys = http_api.list_stake_keys(w1_id)
+        assert isinstance(stake_keys, dict)
+        assert isinstance(stake_keys.get("ours"), list)
 
     def test_list_stake_pools(self, http_api):
-        pytest.skip()
+        stake_pools = http_api.list_stake_pools(int(1000e6))
+        assert isinstance(stake_pools, list)
+        assert isinstance(stake_pools[0], dict)
 
     def test_pool_maintenance_actions(self, http_api):
-        pytest.skip()
+        actions = http_api.pool_maintenance_actions()
+        assert isinstance(actions, dict)
+        assert isinstance(actions.get("gc_stake_pools"), dict)
 
     def test_trigger_pool_maintenance(self, http_api):
-        pytest.skip()
+        http_api.trigger_pool_maintenance("gc_stake_pools")
+        assert True
 
-    def test_estimate_delegation_fee(self, http_api):
-        pytest.skip()
+    def test_estimate_delegation_fee(self, http_api, w1_id):
+        est_fee = http_api.estimate_delegation_fee(w1_id)
+        assert isinstance(est_fee, dict)
+        assert 150000 < est_fee.get("estimated_min").get("quantity") < 200000
 
-    def test_join_stake_pool(self, http_api):
-        pytest.skip()
+    @pytest.mark.skip(reason="Skipping for now to speed up test execution")
+    def test_join_stake_pool(self, wallets_have_ada, http_api, w1_id, passphrase):
+        if not wallets_have_ada:
+            pytest.skip(reason="Wallets must have an ada balance")
+        stake_pools = http_api.list_stake_pools(int(1000e6))
+        pool_id = stake_pools[0].get("id")
+        http_api.join_stake_pool(w1_id, passphrase, pool_id)
+        time.sleep(60)
+        stake_keys = http_api.list_stake_keys(w1_id)
+        assert stake_keys.get("ours")[0].get("delegation").get("next")[0].get("target") == pool_id
 
-    def test_quit_staking(self, http_api):
-        pytest.skip()
+    @pytest.mark.skip(reason="Skipping for now to speed up test execution")
+    def test_quit_staking(self, wallets_have_ada, http_api, w1_id, passphrase):
+        if not wallets_have_ada:
+            pytest.skip(reason="Wallets must have an ada balance")
+        http_api.quit_staking(w1_id, passphrase)
+        time.sleep(60)
+        stake_keys = http_api.list_stake_keys(w1_id)
+        assert stake_keys.get("ours")[0].get("delegation").get("next")[0].get("target") == None
 
     # Keys tests
-    def test_create_account_public_key(self, http_api):
-        pytest.skip()
+    def test_create_account_public_key(self, http_api, w1_id, passphrase):
+        acct_pubkey = http_api.create_account_public_key(w1_id, "1852H", passphrase)
+        assert isinstance(acct_pubkey, str)
+        assert acct_pubkey.startswith("acct_vk1")
 
-    def test_get_account_public_key(self, http_api):
-        pytest.skip()
+    def test_get_account_public_key(self, http_api, w1_id):
+        acct_pubkey = http_api.get_account_public_key(w1_id)
+        assert isinstance(acct_pubkey, str)
+        assert acct_pubkey.startswith("acct_vk1")
 
-    def test_get_public_key(self, http_api):
-        pytest.skip()
+    def test_get_public_key(self, http_api, w1_id):
+        utxo_soft_key = http_api.get_public_key(w1_id, "utxo_external", "0")
+        assert isinstance(utxo_soft_key, str)
+        assert utxo_soft_key.startswith("addr_vk1")
 
     def test_create_policy_id(self, http_api):
         pytest.skip()
 
     def test_create_policy_key(self, http_api):
-        pytest.skip()
-
-    def test_(self, http_api):
         pytest.skip()
 
     # Utils tests
