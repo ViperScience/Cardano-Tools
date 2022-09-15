@@ -241,7 +241,6 @@ class TestWalletTools:
         assert http_api.confirm_tx(w1_id, tx.get("id"))
 
     # Transactions tests
-    @pytest.mark.skip(reason="Skipping for now to speed up test execution")
     def test_estimate_tx_fee(self, wallets_have_ada, http_api, w1_id, w2_id):
         if not wallets_have_ada:
             pytest.skip(reason="Wallets must have an ada balance")
@@ -250,7 +249,6 @@ class TestWalletTools:
         fee = result.get("estimated_max").get("quantity")
         assert 150000 < fee < 200000
 
-    @pytest.mark.skip(reason="Skipping for now to speed up test execution")
     def test_send_lovelace(self, wallets_have_ada, http_api, w1_id, w2_id, passphrase):
         if not wallets_have_ada:
             pytest.skip(reason="Wallets must have an ada balance")
@@ -263,7 +261,6 @@ class TestWalletTools:
         new_ada_balance = lovelace_balance_dict.get("quantity") / 1e6
         assert int(new_ada_balance - orig_ada_balance) == 1
 
-    @pytest.mark.skip(reason="Skipping for now to speed up test execution")
     def test_send_ada(self, wallets_have_ada, http_api, w1_id, w2_id, passphrase):
         if not wallets_have_ada:
             pytest.skip(reason="Wallets must have an ada balance")
@@ -280,10 +277,8 @@ class TestWalletTools:
         if not wallets_have_tokens:
             pytest.skip(reason="Wallets must have an token balance")
         # TODO: Need to mint tokens to test with
-        pdb.set_trace()
         assert False
 
-    @pytest.mark.skip(reason="Skipping for now to speed up test execution")
     def test_send_batch_tx(self, wallets_have_ada, http_api, w1_id, w2_id, passphrase):
         if not wallets_have_ada:
             pytest.skip(reason="Wallets must have an ada balance")
@@ -302,7 +297,6 @@ class TestWalletTools:
         assert int(new_ada_balance - orig_ada_balance) == 2
 
     # Transactions (new) tests
-    @pytest.mark.skip(reason="Skipping for now to speed up test execution")
     def test_new_transactions(self, wallets_have_ada, http_api, w1_id, w2_id, passphrase):
         if not wallets_have_ada:
             pytest.skip(reason="Wallets must have an ada balance")
@@ -381,7 +375,6 @@ class TestWalletTools:
         assert isinstance(est_fee, dict)
         assert 150000 < est_fee.get("estimated_min").get("quantity") < 200000
 
-    @pytest.mark.skip(reason="Skipping for now to speed up test execution")
     def test_join_stake_pool(self, wallets_have_ada, http_api, w1_id, passphrase):
         if not wallets_have_ada:
             pytest.skip(reason="Wallets must have an ada balance")
@@ -392,7 +385,6 @@ class TestWalletTools:
         stake_keys = http_api.list_stake_keys(w1_id)
         assert stake_keys.get("ours")[0].get("delegation").get("next")[0].get("target") == pool_id
 
-    @pytest.mark.skip(reason="Skipping for now to speed up test execution")
     def test_quit_staking(self, wallets_have_ada, http_api, w1_id, passphrase):
         if not wallets_have_ada:
             pytest.skip(reason="Wallets must have an ada balance")
