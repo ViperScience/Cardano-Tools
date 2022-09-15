@@ -240,6 +240,7 @@ class TestWalletTools:
         assert http_api.confirm_tx(w1_id, tx.get("id"))
 
     # Transactions tests
+    @pytest.mark.skip(reason="Skipping for now to speed up test execution")
     def test_estimate_tx_fee(self, wallets_have_ada, http_api, w1_id, w2_id):
         if not wallets_have_ada:
             pytest.skip(reason="Wallets must have an ada balance")
@@ -248,7 +249,8 @@ class TestWalletTools:
         fee = result.get("estimated_max").get("quantity")
         assert 150000 < fee < 200000
 
-    def test_send_lovelace(self, wallets_have_ada, http_api, passphrase, w1_id, w2_id):
+    @pytest.mark.skip(reason="Skipping for now to speed up test execution")
+    def test_send_lovelace(self, wallets_have_ada, http_api, w1_id, w2_id, passphrase):
         if not wallets_have_ada:
             pytest.skip(reason="Wallets must have an ada balance")
         addr = http_api.get_addresses(w2_id)[0]
@@ -260,41 +262,90 @@ class TestWalletTools:
         new_ada_balance = lovelace_balance_dict.get("quantity") / 1e6
         assert int(new_ada_balance - orig_ada_balance) == 1
 
-    def test_send_ada(self, wallets_have_ada, http_api, passphrase, w1_id, w2_id):
+    @pytest.mark.skip(reason="Skipping for now to speed up test execution")
+    def test_send_ada(self, wallets_have_ada, http_api, w1_id, w2_id, passphrase):
         if not wallets_have_ada:
             pytest.skip(reason="Wallets must have an ada balance")
-        addr = http_api.get_addresses(w1_id)[0]
-        lovelace_balance_dict, token_balance = http_api.get_balance(w1_id)
+        addr = http_api.get_addresses(w2_id)[0]
+        lovelace_balance_dict, token_balance = http_api.get_balance(w2_id)
         orig_ada_balance = lovelace_balance_dict.get("quantity") / 1e6
-        # Send 1 ada from wallet 2 to wallet 1
-        http_api.send_ada(w2_id, addr, 1, passphrase, wait=True)
-        lovelace_balance_dict, token_balance = http_api.get_balance(w1_id)
+        # Send 1 ada from wallet 1 to wallet 2
+        http_api.send_ada(w1_id, addr, 1, passphrase, wait=True)
+        lovelace_balance_dict, token_balance = http_api.get_balance(w2_id)
         new_ada_balance = lovelace_balance_dict.get("quantity") / 1e6
         assert int(new_ada_balance - orig_ada_balance) == 1
 
-    def test_send_tokens(self, http_api):
-        pytest.skip()
+    def test_send_tokens(self, wallets_have_tokens, http_api, w1_id, w2_id, passphrase):
+        if not wallets_have_tokens:
+            pytest.skip(reason="Wallets must have an token balance")
+        # TODO: Need to mint tokens to test with
+        pdb.set_trace()
+        assert False
 
-    def test_send_batch_tx(self, http_api):
+    @pytest.mark.skip(reason="Skipping for now to speed up test execution")
+    def test_send_batch_tx(self, wallets_have_ada, http_api, w1_id, w2_id, passphrase):
         if not wallets_have_ada:
             pytest.skip(reason="Wallets must have an ada balance")
-        pytest.skip()
+        addr1 = http_api.get_addresses(w1_id)[0]
+        addr2 = http_api.get_addresses(w1_id)[1]
+        lovelace_balance_dict, token_balance = http_api.get_balance(w1_id)
+        orig_ada_balance = lovelace_balance_dict.get("quantity") / 1e6
+        # Send 2 ada from wallet 2 to wallet 1
+        payments = [
+            {"address": addr1, "amount": {"quantity": 1e6, "unit": "lovelace"}},
+            {"address": addr2, "amount": {"quantity": 1e6, "unit": "lovelace"}},
+        ]
+        http_api.send_batch_tx(w2_id, payments, passphrase, wait=True)
+        lovelace_balance_dict, token_balance = http_api.get_balance(w1_id)
+        new_ada_balance = lovelace_balance_dict.get("quantity") / 1e6
+        assert int(new_ada_balance - orig_ada_balance) == 2
 
     # Transactions (new) tests
-    def test_construct_transaction(self, http_api):
-        pytest.skip()
-
-    def test_sign_transaction(self, http_api):
-        pytest.skip()
-
-    def test_decode_transaction(self, http_api):
-        pytest.skip()
-
-    def test_submit_transaction(self, http_api):
-        pytest.skip()
-
-    def test_(self, http_api):
-        pytest.skip()
+    @pytest.mark.skip(reason="Skipping for now to speed up test execution")
+    def test_new_transactions(self, wallets_have_ada, http_api, w1_id, w2_id, passphrase):
+        if not wallets_have_ada:
+            pytest.skip(reason="Wallets must have an ada balance")
+        addr = http_api.get_addresses(w2_id)[0]
+        payload = json.loads(
+            f"""{{
+                "payments": [
+                    {{
+                        "address": "{addr}",
+                        "amount": {{
+                            "quantity": 1e6,
+                            "unit": "lovelace"
+                        }}
+                    }}
+                ],
+                "withdrawal": "self",
+                "validity_interval": {{
+                    "invalid_hereafter": {{
+                        "quantity": 3600,
+                        "unit": "second"
+                    }}
+                }},
+                "encoding": "base16"
+            }}"""
+        )
+        # Test construct_transaction
+        tx = http_api.construct_transaction(w1_id, payload)
+        encoded_tx = tx.get("transaction")
+        assert isinstance(encoded_tx, str)
+        # Test sign_transaction
+        signed_tx = http_api.sign_transaction(w1_id, passphrase, encoded_tx)
+        assert isinstance(signed_tx.get("transaction"), str)
+        # Test decode_transaction
+        decoded_tx = http_api.decode_transaction(w1_id, signed_tx.get("transaction"))
+        assert decoded_tx.get("outputs")[0].get("address") == addr
+        tx_id = decoded_tx.get("id")
+        # Test submit_transaction
+        lovelace_balance_dict, token_balance = http_api.get_balance(w2_id)
+        orig_ada_balance = lovelace_balance_dict.get("quantity") / 1e6
+        tx_output = http_api.submit_transaction(w1_id, signed_tx.get("transaction"))
+        http_api.confirm_tx(w1_id, tx_id)
+        lovelace_balance_dict, token_balance = http_api.get_balance(w2_id)
+        new_ada_balance = lovelace_balance_dict.get("quantity") / 1e6
+        assert int(new_ada_balance - orig_ada_balance) == 1
 
     # Migrations tests
     def test_create_migration_plan(self, http_api):

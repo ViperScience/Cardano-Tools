@@ -561,7 +561,7 @@ class WalletHTTP:
         """
         for payment in payments:
             # Make sure we send at least the minimum lovelace amount
-            assets = payment.get("assets")
+            assets = payment.get("assets") if "assets" in payment.keys() else []
             lovelace_amount = payment.get("amount").get("quantity")
             min_lovelace = minimum_utxo(
                 [f"{asset.get('policy_id')}.{asset.get('asset_name')}" for asset in assets],
