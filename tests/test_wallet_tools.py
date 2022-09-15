@@ -119,7 +119,7 @@ def wallet_server_exists():
 
 wallet_running = pytest.mark.skipif(
     not wallet_server_exists(),
-    reason="Requires cardano-wallet to be running",
+    reason="These tests require cardano-wallet to be running",
 )
 
 
@@ -240,19 +240,44 @@ class TestWalletTools:
         assert http_api.confirm_tx(w1_id, tx.get("id"))
 
     # Transactions tests
-    def test_estimate_tx_fee(self, http_api):
-        pytest.skip()
+    def test_estimate_tx_fee(self, wallets_have_ada, http_api, w1_id, w2_id):
+        if not wallets_have_ada:
+            pytest.skip(reason="Wallets must have an ada balance")
+        addr = http_api.get_addresses(w2_id)[0]
+        result = http_api.estimate_tx_fee(w1_id, addr, 10e6)
+        fee = result.get("estimated_max").get("quantity")
+        assert 150000 < fee < 180000
 
-    def test_send_lovelace(self, http_api):
-        pytest.skip()
+    def test_send_lovelace(self, wallets_have_ada, http_api, passphrase, w1_id, w2_id):
+        if not wallets_have_ada:
+            pytest.skip(reason="Wallets must have an ada balance")
+        addr = http_api.get_addresses(w2_id)[0]
+        lovelace_balance_dict, token_balance = http_api.get_balance(w2_id)
+        orig_ada_balance = lovelace_balance_dict.get("quantity") / 1e6
+        # Send 1 ada from wallet 1 to wallet 2
+        http_api.send_lovelace(w1_id, addr, 1e6, passphrase, wait=True)
+        lovelace_balance_dict, token_balance = http_api.get_balance(w2_id)
+        new_ada_balance = lovelace_balance_dict.get("quantity") / 1e6
+        assert int(new_ada_balance - orig_ada_balance) == 1
 
-    def test_send_ada(self, http_api):
-        pytest.skip()
+    def test_send_ada(self, wallets_have_ada, http_api, passphrase, w1_id, w2_id):
+        if not wallets_have_ada:
+            pytest.skip(reason="Wallets must have an ada balance")
+        addr = http_api.get_addresses(w1_id)[0]
+        lovelace_balance_dict, token_balance = http_api.get_balance(w1_id)
+        orig_ada_balance = lovelace_balance_dict.get("quantity") / 1e6
+        # Send 1 ada from wallet 2 to wallet 1
+        http_api.send_ada(w2_id, addr, 1, passphrase, wait=True)
+        lovelace_balance_dict, token_balance = http_api.get_balance(w1_id)
+        new_ada_balance = lovelace_balance_dict.get("quantity") / 1e6
+        assert int(new_ada_balance - orig_ada_balance) == 1
 
     def test_send_tokens(self, http_api):
         pytest.skip()
 
     def test_send_batch_tx(self, http_api):
+        if not wallets_have_ada:
+            pytest.skip(reason="Wallets must have an ada balance")
         pytest.skip()
 
     # Transactions (new) tests
@@ -322,25 +347,25 @@ class TestWalletTools:
     # Utils tests
     def test_get_smash_health(self, http_api):
         health = http_api.get_smash_health()
-        assert health.get("health")
+        assert isinstance(health.get("health"), str)
 
     # Network tests
     def test_get_network_info(self, http_api):
         info = http_api.get_network_info()
-        assert info.get("network_info")
+        assert isinstance(info.get("network_info"), dict)
 
     def test_get_network_clock(self, http_api):
         clock = http_api.get_network_clock()
-        assert clock.get("status")
+        assert isinstance(clock.get("status"), str)
 
     def test_get_network_params(self, http_api):
         params = http_api.get_network_params()
-        assert params.get("genesis_block_hash")
+        assert isinstance(params.get("genesis_block_hash"), str)
 
     # Settings tests
     def test_get_settings(self, http_api):
         settings = http_api.get_settings()
-        assert settings.get("pool_metadata_source")
+        assert isinstance(settings.get("pool_metadata_source"), str)
 
     def test_update_settings(self, http_api):
         smash_source = "direct"
