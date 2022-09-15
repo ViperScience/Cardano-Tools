@@ -246,7 +246,7 @@ class TestWalletTools:
         addr = http_api.get_addresses(w2_id)[0]
         result = http_api.estimate_tx_fee(w1_id, addr, 10e6)
         fee = result.get("estimated_max").get("quantity")
-        assert 150000 < fee < 180000
+        assert 150000 < fee < 200000
 
     def test_send_lovelace(self, wallets_have_ada, http_api, passphrase, w1_id, w2_id):
         if not wallets_have_ada:
