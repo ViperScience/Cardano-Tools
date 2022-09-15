@@ -417,11 +417,15 @@ class TestWalletTools:
         assert isinstance(utxo_soft_key, str)
         assert utxo_soft_key.startswith("addr_vk1")
 
-    def test_create_policy_id(self, http_api):
-        pytest.skip()
+    def test_create_policy_id(self, http_api, w1_id):
+        policy_id = http_api.create_policy_id(w1_id, "cosigner#0")
+        assert isinstance(policy_id, dict)
+        assert isinstance(policy_id.get("policy_id"), str)
 
-    def test_create_policy_key(self, http_api):
-        pytest.skip()
+    def test_create_policy_key(self, http_api, w1_id, passphrase):
+        policy_key = http_api.create_policy_key(w1_id, passphrase)
+        assert isinstance(policy_key, str)
+        assert policy_key.startswith("policy_vk1")
 
     # Utils tests
     def test_get_smash_health(self, http_api):
