@@ -348,11 +348,12 @@ class TestWalletTools:
         assert int(new_ada_balance - orig_ada_balance) == 1
 
     # Migrations tests
-    def test_create_migration_plan(self, http_api):
-        pytest.skip()
-
-    def test_migrate_wallet(self, http_api):
-        pytest.skip()
+    def test_create_migration_plan(self, wallets_have_ada, http_api, w1_id, w2_id):
+        if not wallets_have_ada:
+            pytest.skip(reason="Wallets must have an ada balance")
+        addr = http_api.get_addresses(w2_id)[0]
+        migration_plan = http_api.create_migration_plan(w1_id, [addr])
+        assert migration_plan.get("selections")[0].get("outputs")[0].get("address") == addr
 
     # Stake Pools tests
     def test_list_stake_keys(self, http_api):
