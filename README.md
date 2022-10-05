@@ -16,6 +16,48 @@ The Cardano Tools package supports Python 3.9 and above.
 
 The library provides objects for interfacing with different parts of the Cardano ecosystem: the node, the node CLI, and the wallet server. The basic usage is outlined below. For more help see the [example scripts](https://gitlab.com/viper-staking/cardano-tools/-/tree/master/examples) and browse through the code.
 
+The cardano-node and cardano-wallet applications can be run natively, by installing them on your local machine, or via Docker. 
+
+### Native Cardano Binaries
+
+To run the Cardano node and wallet binaries on your local machine, follow the installation instructions in the respective GitHub README: [cardano-node](https://github.com/input-output-hk/cardano-node), [cardano-wallet](https://github.com/input-output-hk/cardano-wallet).
+
+### Docker Cardano Binaries
+
+To avoid building and installing the Cardano node and wallet binaries on your local machine, IOG provides prebuilt Docker containers with a corresponding Docker [Compose](https://github.com/input-output-hk/cardano-wallet/blob/master/docker-compose.yml) file. Download this file somewhere on your local machine.
+
+**NOTE**: Some cardano-cli commands require files to be provided. This poses a problem, as Cardano Tools runs from the local filesystem and the CLI runs within Docker. In order to share files between the two environments, we must setup a bind volume in the cardano-node docker container, which will link a local directory to a directory within the docker container. To do this, we must edit the docker-compose.yml file. The cardano-node section will look like this:
+
+```
+services:
+  cardano-node:
+    image: <image_name>
+    environment:
+      NETWORK:
+    volumes:
+      - node-${NETWORK}-db:/data
+      - node-ipc:/ipc
+    restart: on-failure
+    ...
+```
+
+Setup a bind volume in this container by adding the following lines below the `node-ipc` definition:
+```
+      - type: bind
+        source: ${CARDANO_TOOLS_PATH}/config
+        target: /config
+```
+
+Now set the CARDANO_TOOLS_PATH environment variable to the location where Cardano Tools in installed, e.g.:
+
+`export CARDANO_TOOLS_PATH=${HOME}/cardano-tools`
+
+Finally run the applications via docker compose: 
+
+`NETWORK=preview docker compose up -d`
+
+This will start up the Cardano node and wallet applications and connect to the specified network (mainnet, preview, preprod)
+
 ### The Cardano-Node
 
 A cardano-node may be started in passive mode from a Python script using the code:

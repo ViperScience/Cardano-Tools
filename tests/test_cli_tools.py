@@ -1,6 +1,8 @@
-import pytest
-import os
 import json
+import os
+
+import pytest
+import requests
 
 from cardano_tools import cli_tools
 
@@ -28,8 +30,30 @@ def era(is_testnet) -> str:
 
 
 @pytest.fixture
-def cli_node(network, era):
-    working_dir = os.getcwd()
+def working_dir() -> str:
+    path = "./config"
+    if not os.path.exists(path):
+        os.makedirs(path)
+    return path
+
+
+@pytest.fixture
+def shelley_genesis(is_testnet, working_dir) -> str:
+    filename = "shelley-genesis.json"
+    filepath = f"{working_dir}/{filename}"
+    if is_testnet:
+        environment = "preview"
+    else:
+        environment = "mainnet"
+    url = f"https://book.world.dev.cardano.org/environments/{environment}/{filename}"
+    r = requests.get(url)
+    with open(filepath, "wb") as gen_file:
+        gen_file.write(r.content)
+    return filepath
+
+
+@pytest.fixture
+def cli_node(network, era, working_dir):
     yield cli_tools.NodeCLI(
         binary_path=os.path.abspath(os.getenv("CARDANO_NODE_CLI_PATH")).replace("\\", "/"),
         socket_path=os.path.abspath(os.getenv("CARDANO_NODE_SOCKET_PATH")).replace("\\", "/"),
@@ -69,7 +93,7 @@ def test_get_era(cli_node, era):
 
 def test_get_protocol_parameters(cli_node):
     params = cli_node.get_protocol_parameters()
-    assert "protocolVersion" in params 
+    assert "protocolVersion" in params
 
 
 def test_get_min_utxo(cli_node):
@@ -77,8 +101,8 @@ def test_get_min_utxo(cli_node):
     assert min_utxo > 0
 
 
-def test_days2slots(cli_node):
-    pass
+def test_days2slots(cli_node, working_dir, shelley_genesis):
+    cli_node.days2slots(1, shelley_genesis)
 
 
 def test_days2epochs(cli_node):

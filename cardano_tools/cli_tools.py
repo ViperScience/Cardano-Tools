@@ -1,20 +1,19 @@
+import json
+import logging
+import os
+import shlex
+import subprocess
+import sys
 from collections import namedtuple
 from ctypes import Union
 from datetime import datetime
 from pathlib import Path
 from typing import Tuple
-import subprocess
-import requests
-import logging
-import shlex
-import json
-import sys
-import os
 
+import requests
 
 # Cardano-Tools components
 from . import utils
-
 
 LATEST_SUPPORTED_NODE_VERSION = "1.32.1"
 
@@ -95,18 +94,13 @@ class NodeCLI:
         transactions.
         """
         if self.protocol_parameters is None:
-            stdout, stderr = self.run_cli(
-                f"{self.cli} query protocol-parameters {self.network} "
-            )
+            stdout, stderr = self.run_cli(f"{self.cli} query protocol-parameters {self.network} ")
             self.protocol_parameters = json.loads(stdout)
         return self.protocol_parameters
 
     def save_protocol_parameters(self, outfile: str):
-        """Saves the protocol parameters to the specified file
-        """
-        self.run_cli(
-            f"{self.cli} query protocol-parameters {self.network} --out-file {outfile}"
-        )
+        """Saves the protocol parameters to the specified file"""
+        self.run_cli(f"{self.cli} query protocol-parameters {self.network} --out-file {outfile}")
 
     def get_min_utxo(self) -> int:
         """Get the minimum ADA only UTxO size."""
