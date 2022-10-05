@@ -26,7 +26,7 @@ def is_testnet(network) -> bool:
 
 @pytest.fixture
 def era(is_testnet) -> str:
-    return "babbage" if is_testnet else "alonzo"
+    return "babbage"
 
 
 @pytest.fixture
