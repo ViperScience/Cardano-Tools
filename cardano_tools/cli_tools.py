@@ -319,7 +319,8 @@ class NodeCLI:
         int
             The minimum fee in lovelaces.
         """
-        params_file = self.get_protocol_parameters()
+        params_filepath = os.path.join(self.working_dir, "params.json")
+        self.save_protocol_parameters(params_filepath)
         result = self.run_cli(
             f"{self.cli} transaction calculate-min-fee "
             f"--tx-body-file {tx_draft} "
@@ -327,7 +328,7 @@ class NodeCLI:
             f"--tx-out-count {tx_out_count} "
             f"--witness-count {witness_count} "
             f"--byron-witness-count {byron_witness_count} "
-            f"{self.network} --protocol-params-file {params_file}"
+            f"{self.network} --protocol-params-file {params_filepath}"
         )
         min_fee = int(result.stdout.split()[0])
         return min_fee
