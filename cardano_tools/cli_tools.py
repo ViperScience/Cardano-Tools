@@ -1845,7 +1845,7 @@ class NodeCLI:
             raise NodeCLIError(f"Must set current_epoch and/or next_epoch argument to True.")
 
         result = self.run_cli(
-            f"{self.cli} query leadership-schedule {self.network}"
+            f"{self.cli} query leadership-schedule {self.network} "
             f"--genesis {genesis_file} "
             f"--vrf-signing-key-file {pool_vrf_key} "
             f"--stake-pool-id {pool_id} "
