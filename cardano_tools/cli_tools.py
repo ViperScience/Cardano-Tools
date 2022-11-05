@@ -30,7 +30,7 @@ class NodeCLI:
         working_dir,
         ttl_buffer=1000,
         network="--mainnet",
-        era="--mary-era",
+        era="--babbage-era",
     ):
         self.logger = logging.getLogger(__name__)
 
@@ -1808,6 +1808,51 @@ class NodeCLI:
         result = self.run_cli(f"{self.cli} stake-pool id " f"--verification-key-file {cold_vkey}")
         pool_id = result.stdout
         return pool_id
+
+    def get_leadership_schedule(
+        self, genesis_file, pool_vrf_key, pool_id, current_epoch, next_epoch
+    ) -> str:
+        """Return the stake pool slot leadership schedule for the current
+        or next epoch (Note: This command takes a few minutes to complete)
+
+        Parameters
+        ----------
+        genesis_file : str or Path
+            Path to the Shelley genesis file.
+        pool_vrf_key : str or Path
+            Path to the pool's verification key.
+        pool_id : str
+            The stake pool id.
+        current_epoch : bool
+            Flag to indicate whether to query slots for the current epoch.
+        next_epoch : bool
+            Flag to indicate whether to query slots for the next epoch.
+
+        Returns
+        ----------
+        str
+            The slot leadership schedule for the current and/or next epoch.
+
+        --genesis ../relay1/mainnet-shelley-genesis.json --vrf-signing-key-file FAITH_vrf.skey --stake-pool-id 383696c7f29a9a49c1da49ed35bebbd6097cea5b58a95da5c7df27ee --next
+
+        """
+        flags = ""
+        if current_epoch:
+            flags += "--current "
+        if next_epoch:
+            flags += "--next "
+        if flags == "":
+            raise NodeCLIError(f"Must set current_epoch and/or next_epoch argument to True.")
+
+        result = self.run_cli(
+            f"{self.cli} query leadership-schedule {self.network}"
+            f"--genesis {genesis_file} "
+            f"--vrf-signing-key-file {pool_vrf_key} "
+            f"--stake-pool-id {pool_id} "
+            f"{flags} "
+        )
+        schedule = result.stdout
+        return schedule
 
     def claim_staking_rewards(
         self,
