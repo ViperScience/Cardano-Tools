@@ -102,6 +102,24 @@ class NodeCLI:
         """Saves the protocol parameters to the specified file"""
         self.run_cli(f"{self.cli} query protocol-parameters {self.network} --out-file {outfile}")
 
+    def get_mempool_info(self) -> str:
+        """Returns information about the node's mempool."""
+        cmd = f"{self.cli} query tx-mempool info"
+        result = self.run_cli(cmd)
+        return result
+
+    def get_mempool_next_tx(self) -> str:
+        """Gets the next transaction to be processed by the node."""
+        cmd = f"{self.cli} query tx-mempool next-tx"
+        result = self.run_cli(cmd)
+        return result
+
+    def tx_in_mempool(self, transaction_id: str) -> bool:
+        """Returns True if the provided transaction is in the node's mempool."""
+        result = self.run_cli(f"{self.cli} query tx-mempool tx-exists {transaction_id}")
+        # TODO: Parse output
+        return result.stdout
+
     def get_min_utxo(self) -> int:
         """Get the minimum ADA only UTxO size."""
         # These are constants but may change in the future
