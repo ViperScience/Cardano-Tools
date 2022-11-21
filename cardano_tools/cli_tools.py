@@ -1854,20 +1854,20 @@ class NodeCLI:
         --genesis ../relay1/mainnet-shelley-genesis.json --vrf-signing-key-file FAITH_vrf.skey --stake-pool-id 383696c7f29a9a49c1da49ed35bebbd6097cea5b58a95da5c7df27ee --next
 
         """
-        flags = ""
+        # Must specify current or next epoch flag (but can't specify both)
         if current_epoch:
-            flags += "--current "
-        if next_epoch:
-            flags += "--next "
-        if flags == "":
-            raise NodeCLIError(f"Must set current_epoch and/or next_epoch argument to True.")
+            flag = "--current "
+        elif next_epoch:
+            flag = "--next "
+        if flag == "":
+            raise NodeCLIError(f"Must set current_epoch or next_epoch argument to True.")
 
         result = self.run_cli(
             f"{self.cli} query leadership-schedule {self.network} "
             f"--genesis {genesis_file} "
             f"--vrf-signing-key-file {pool_vrf_key} "
             f"--stake-pool-id {pool_id} "
-            f"{flags} "
+            f"{flag} "
         )
         schedule = result.stdout
         return schedule
