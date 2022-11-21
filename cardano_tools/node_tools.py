@@ -2,7 +2,7 @@ import signal
 import logging
 import subprocess
 
- 
+
 class CardanoNodeError(Exception):
     pass
 

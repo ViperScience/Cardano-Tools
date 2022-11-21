@@ -1,0 +1,25 @@
+before_script:
+  - python3 --version  # For debugging
+  - python3 -m pip install poetry
+  - poetry install
+
+test-windows:
+  tags:
+    - cardano-node # cardano-node required to be setup on runner
+    - windows
+  script:
+    - poetry run pytest --cov=. --cov-report term-missing
+
+test-linux:
+  tags:
+    - cardano-node # cardano-node required to be setup on runner
+    - linux 
+  script:
+    - poetry run pytest --cov=. --cov-report term-missing
+
+test-testnet:
+  tags:
+    - cardano-node
+    - testnet
+  script:
+    - poetry run pytest --cov=. --cov-report term-missing

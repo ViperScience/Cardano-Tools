@@ -1,20 +1,19 @@
+import json
+import logging
+import os
+import shlex
+import subprocess
+import sys
 from collections import namedtuple
 from ctypes import Union
 from datetime import datetime
 from pathlib import Path
 from typing import Tuple
-import subprocess
-import requests
-import logging
-import shlex
-import json
-import sys
-import os
 
+import requests
 
 # Cardano-Tools components
 from . import utils
-
 
 LATEST_SUPPORTED_NODE_VERSION = "1.32.1"
 
@@ -31,7 +30,7 @@ class NodeCLI:
         working_dir,
         ttl_buffer=1000,
         network="--mainnet",
-        era="--mary-era",
+        era="--babbage-era",
     ):
         self.logger = logging.getLogger(__name__)
 
@@ -61,7 +60,7 @@ class NodeCLI:
     def check_node_version(self):
         res = self.run_cli(f"{self.cli} --version")
         if res.stdout.split(" ")[1] != LATEST_SUPPORTED_NODE_VERSION:
-            self.logger.warn(f"Unsupported cardano-node version.")
+            self.logger.warning(f"Unsupported cardano-node version.")
 
     def run_cli(self, cmd):
         os.environ["CARDANO_NODE_SOCKET_PATH"] = self.socket
@@ -90,31 +89,51 @@ class NodeCLI:
     def _cleanup_file(self, fpath):
         os.remove(fpath)
 
-    def load_protocol_parameters(self):
+    def get_protocol_parameters(self):
         """Load the protocol parameters which are needed for creating
         transactions.
         """
-        params_file = self.working_dir / "protocol.json"
-        self.run_cli(
-            f"{self.cli} query protocol-parameters {self.network} " f"--out-file {params_file}"
-        )
-        json_data = self._load_text_file(params_file)
-        self.protocol_parameters = json.loads(json_data)
-        return params_file
+        if self.protocol_parameters is None:
+            stdout, stderr = self.run_cli(f"{self.cli} query protocol-parameters {self.network} ")
+            self.protocol_parameters = json.loads(stdout)
+        return self.protocol_parameters
+
+    def save_protocol_parameters(self, outfile: str):
+        """Saves the protocol parameters to the specified file"""
+        self.run_cli(f"{self.cli} query protocol-parameters {self.network} --out-file {outfile}")
+
+    def get_mempool_info(self) -> str:
+        """Returns information about the node's mempool."""
+        cmd = f"{self.cli} query tx-mempool info"
+        result = self.run_cli(cmd)
+        return result
+
+    def get_mempool_next_tx(self) -> str:
+        """Gets the next transaction to be processed by the node."""
+        cmd = f"{self.cli} query tx-mempool next-tx"
+        result = self.run_cli(cmd)
+        return result
+
+    def tx_in_mempool(self, transaction_id: str) -> bool:
+        """Returns True if the provided transaction is in the node's mempool."""
+        result = self.run_cli(f"{self.cli} query tx-mempool tx-exists {transaction_id}")
+        # TODO: Parse output
+        return result.stdout
 
     def get_min_utxo(self) -> int:
         """Get the minimum ADA only UTxO size."""
-
-        # Ensure the parameters file exists
-        self.load_protocol_parameters()
-
         # These are constants but may change in the future
         coin_Size = 2
         utxo_entry_size_without_val = 27
         ada_only_utxo_size = utxo_entry_size_without_val + coin_Size
 
         # Calculate the minimum UTxO from network parameters
-        utxo_cost_word = self.protocol_parameters["utxoCostPerWord"]
+        # Babbage era changed utxoCostPerWord to utxoCostPerByte
+        params = self.get_protocol_parameters()
+        if params.get("utxoCostPerWord"):
+            utxo_cost_word = self.get_protocol_parameters().get("utxoCostPerWord")
+        else:
+            utxo_cost_word = self.get_protocol_parameters().get("utxoCostPerByte")
         return ada_only_utxo_size * utxo_cost_word
 
     def cli_tip_query(self):
@@ -128,18 +147,37 @@ class NodeCLI:
         vals = json.loads(result.stdout)
         return vals
 
+    def get_sync_progress(self) -> float:
+        """Query the node for the sync progress."""
+        vals = self.cli_tip_query()
+        return float(vals["syncProgress"])
+
     def get_epoch(self) -> int:
         """Query the node for the current epoch."""
         vals = self.cli_tip_query()
         if float(vals["syncProgress"]) != 100.0:
-            self.logger.warn("Node not fully synced!")
+            self.logger.warning("Node not fully synced!")
         return vals["epoch"]
+
+    def get_slot(self) -> int:
+        """Query the node for the current slot."""
+        vals = self.cli_tip_query()
+        if float(vals["syncProgress"]) != 100.0:
+            self.logger.warning("Node not fully synced!")
+        return vals["slot"]
+
+    def get_era(self) -> int:
+        """Query the node for the current era."""
+        vals = self.cli_tip_query()
+        if float(vals["syncProgress"]) != 100.0:
+            self.logger.warning("Node not fully synced!")
+        return vals["era"]
 
     def get_tip(self) -> int:
         """Query the node for the current tip of the blockchain."""
         vals = self.cli_tip_query()
         if float(vals["syncProgress"]) != 100.0:
-            self.logger.warn("Node not fully synced!")
+            self.logger.warning("Node not fully synced!")
         return vals["slot"]
 
     def make_address(self, name, folder=None) -> str:
@@ -299,7 +337,8 @@ class NodeCLI:
         int
             The minimum fee in lovelaces.
         """
-        params_file = self.load_protocol_parameters()
+        params_filepath = os.path.join(self.working_dir, "params.json")
+        self.save_protocol_parameters(params_filepath)
         result = self.run_cli(
             f"{self.cli} transaction calculate-min-fee "
             f"--tx-body-file {tx_draft} "
@@ -307,7 +346,7 @@ class NodeCLI:
             f"--tx-out-count {tx_out_count} "
             f"--witness-count {witness_count} "
             f"--byron-witness-count {byron_witness_count} "
-            f"{self.network} --protocol-params-file {params_file}"
+            f"{self.network} --protocol-params-file {params_filepath}"
         )
         min_fee = int(result.stdout.split()[0])
         return min_fee
@@ -417,7 +456,7 @@ class NodeCLI:
         utxos.sort(key=lambda k: k["Lovelace"], reverse=True)
 
         # Ensure the parameters file exists
-        self.load_protocol_parameters()
+        self.get_protocol_parameters()
 
         # Iterate through the UTXOs until we have enough funds to cover the
         # transaction. Also, create the tx_in string for the transaction.
@@ -441,7 +480,7 @@ class NodeCLI:
             min_fee = self.calc_min_fee(tx_draft_file, utxo_count, tx_out_count=1, witness_count=2)
 
             # TX cost
-            cost = min_fee + self.protocol_parameters["stakeAddressDeposit"]
+            cost = min_fee + self.get_protocol_parameters.get("stakeAddressDeposit")
             if utxo_total > cost:
                 break
 
@@ -1315,7 +1354,7 @@ class NodeCLI:
         ttl = tip + self.ttl_buffer
 
         # Ensure the parameters file exists
-        self.load_protocol_parameters()
+        self.get_protocol_parameters()
 
         # Iterate through the UTXOs until we have enough funds to cover the
         # transaction. Also, create the tx_in string for the transaction.
@@ -1564,7 +1603,7 @@ class NodeCLI:
         ttl = tip + self.ttl_buffer
 
         # Ensure the parameters file exists
-        self.load_protocol_parameters()
+        self.get_protocol_parameters()
 
         # Iterate through the UTXOs until we have enough funds to cover the
         # transaction. Also, create the tx_in string for the transaction.
@@ -1675,8 +1714,8 @@ class NodeCLI:
         """
 
         # Get the network parameters
-        self.load_protocol_parameters()
-        e_max = self.protocol_parameters["eMax"]
+        self.get_protocol_parameters()
+        e_max = self.get_protocol_parameters().get("eMax")
 
         # Make sure the remaining epochs is a valid number.
         if remaining_epochs < 1:
@@ -1788,6 +1827,51 @@ class NodeCLI:
         pool_id = result.stdout
         return pool_id
 
+    def get_leadership_schedule(
+        self, genesis_file, pool_vrf_key, pool_id, current_epoch, next_epoch
+    ) -> str:
+        """Return the stake pool slot leadership schedule for the current
+        or next epoch (Note: This command takes a few minutes to complete)
+
+        Parameters
+        ----------
+        genesis_file : str or Path
+            Path to the Shelley genesis file.
+        pool_vrf_key : str or Path
+            Path to the pool's verification key.
+        pool_id : str
+            The stake pool id.
+        current_epoch : bool
+            Flag to indicate whether to query slots for the current epoch.
+        next_epoch : bool
+            Flag to indicate whether to query slots for the next epoch.
+
+        Returns
+        ----------
+        str
+            The slot leadership schedule for the current and/or next epoch.
+
+        --genesis ../relay1/mainnet-shelley-genesis.json --vrf-signing-key-file FAITH_vrf.skey --stake-pool-id 383696c7f29a9a49c1da49ed35bebbd6097cea5b58a95da5c7df27ee --next
+
+        """
+        # Must specify current or next epoch flag (but can't specify both)
+        if current_epoch:
+            flag = "--current "
+        elif next_epoch:
+            flag = "--next "
+        if flag == "":
+            raise NodeCLIError(f"Must set current_epoch or next_epoch argument to True.")
+
+        result = self.run_cli(
+            f"{self.cli} query leadership-schedule {self.network} "
+            f"--genesis {genesis_file} "
+            f"--vrf-signing-key-file {pool_vrf_key} "
+            f"--stake-pool-id {pool_id} "
+            f"{flag} "
+        )
+        schedule = result.stdout
+        return schedule
+
     def claim_staking_rewards(
         self,
         stake_addr,
@@ -1846,7 +1930,7 @@ class NodeCLI:
         tx_name = datetime.now().strftime("claim_rewards_%Y-%m-%d_%Hh%Mm%Ss")
 
         # Ensure the parameters file exists
-        self.load_protocol_parameters()
+        self.get_protocol_parameters()
 
         # Determine the TTL
         tip = self.get_tip()
@@ -2207,12 +2291,8 @@ class NodeCLI:
         int
             The minimum transaction output (Lovelace).
         """
-
-        # Ensure the parameters file exists
-        self.load_protocol_parameters()
-
         # Use the globally defined function
-        return utils.minimum_utxo(assets, self.protocol_parameters)
+        return utils.minimum_utxo(assets, self.get_protocol_parameters())
 
     def _get_token_utxos(self, addr, policy_id, asset_names, quantities):
         """Get a list of UTxOs that contain the desired assets.
