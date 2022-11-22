@@ -30,7 +30,11 @@ def minimum_utxo(assets, params) -> int:
     pid_size = 28
 
     # Get the minimum UTxO parameter
-    utxo_cost_word = params["utxoCostPerWord"]
+    # Babbage era changed utxoCostPerWord to utxoCostPerByte
+    if params.get("utxoCostPerWord"):
+        utxo_cost_word = params.get("utxoCostPerWord")
+    else:
+        utxo_cost_word = params.get("utxoCostPerByte")
     min_utxo = ada_only_utxo_size * utxo_cost_word
     if len(assets) == 0:
         return min_utxo
