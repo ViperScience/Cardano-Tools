@@ -3,12 +3,12 @@ before_script:
   - python3 -m pip install poetry
   - poetry install
 
-test-windows:
-  tags:
-    - cardano-node # cardano-node required to be setup on runner
-    - windows
-  script:
-    - poetry run pytest --cov=. --cov-report term-missing
+# test-windows:
+#   tags:
+#     - cardano-node # cardano-node required to be setup on runner
+#     - windows
+#   script:
+#     - poetry run pytest --cov=. --cov-report term-missing
 
 test-linux:
   tags:
