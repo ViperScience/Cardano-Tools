@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "cardano-tools"
-version = "2.0.1"
+version = "2.1.0"
 description = "A collection of tools to enable development in the Cardano ecosystem using the Python programming language."
 repository = "https://gitlab.com/viper-staking/cardano-tools"
 authors = ["Viper Science LLC <viperstakepool@gmail.com>"]

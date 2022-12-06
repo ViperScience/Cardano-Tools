@@ -122,19 +122,7 @@ class NodeCLI:
 
     def get_min_utxo(self) -> int:
         """Get the minimum ADA only UTxO size."""
-        # These are constants but may change in the future
-        coin_Size = 2
-        utxo_entry_size_without_val = 27
-        ada_only_utxo_size = utxo_entry_size_without_val + coin_Size
-
-        # Calculate the minimum UTxO from network parameters
-        # Babbage era changed utxoCostPerWord to utxoCostPerByte
-        params = self.get_protocol_parameters()
-        if params.get("utxoCostPerWord"):
-            utxo_cost_word = self.get_protocol_parameters().get("utxoCostPerWord")
-        else:
-            utxo_cost_word = self.get_protocol_parameters().get("utxoCostPerByte")
-        return ada_only_utxo_size * utxo_cost_word
+        return utils.minimum_utxo(self.get_protocol_parameters())
 
     def cli_tip_query(self):
         """Query the node for the current tip of the blockchain.
@@ -2277,23 +2265,6 @@ class NodeCLI:
         result = self.run_cli(f"{self.cli} transaction policyid " f" --script-file {script_path}")
         return result.stdout
 
-    def calc_min_utxo(self, assets) -> int:
-        """Calculate the minimum UTxO value when assets are part of the
-        transaction.
-
-        Parameters
-        ----------
-        assets : list
-            A list of assets in the format policyid.name.
-
-        Returns
-        -------
-        int
-            The minimum transaction output (Lovelace).
-        """
-        # Use the globally defined function
-        return utils.minimum_utxo(assets, self.get_protocol_parameters())
-
     def _get_token_utxos(self, addr, policy_id, asset_names, quantities):
         """Get a list of UTxOs that contain the desired assets.
 
@@ -2468,8 +2439,14 @@ class NodeCLI:
             return_token_utxo_str += f" + {return_tokens[token]} {token}"
 
         # Calculate the minimum ADA for the token UTxOs.
-        min_utxo_out = self.calc_min_utxo(output_tokens.keys())
-        min_utxo_ret = self.calc_min_utxo(return_tokens.keys())
+        min_utxo_out = utils.minimum_utxo(
+            self.get_protocol_parameters(),
+            output_tokens.keys()
+        )
+        min_utxo_ret = utils.minimum_utxo(
+            self.get_protocol_parameters(),
+            return_tokens.keys()
+        )
 
         # Lovelace to send with the Token
         utxo_out = max([min_utxo_out, int(ada * 1_000_000)])
@@ -2733,7 +2710,7 @@ class NodeCLI:
         mint_assets = [f"{policy_id}.{name}" for name in asset_names]
         if len(mint_assets) == 0:
             mint_assets = [policy_id]
-        min_love = self.calc_min_utxo(mint_assets)
+        min_love = utils.minimum_utxo(self.get_protocol_parameters(), mint_assets)
 
         # Lovelace to send with the Token
         utxo_out = max([min_love, int(ada * 1_000_000)])
@@ -2982,7 +2959,7 @@ class NodeCLI:
             tx_out_count=1,
             witness_count=witness_count,
         )
-        min_utxo_ret = self.calc_min_utxo(return_tokens.keys())
+        min_utxo_ret = utils.minimum_utxo(self.get_protocol_parameters(), return_tokens.keys())
 
         # If we don't have enough ADA, we will have to add another UTxO to cover
         # the transaction fees.

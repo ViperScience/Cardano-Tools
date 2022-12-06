@@ -1,16 +1,16 @@
 from .bech32 import bech32_decode, bech32_encode
 
 
-def minimum_utxo(assets, params) -> int:
+def minimum_utxo(params, assets=[]) -> int:
     """Calculate the minimum UTxO value when assets are part of the
     transaction.
 
     Parameters
     ----------
-    assets : list
-        A list of assets in the format policyid.name.
     params : dict
         A dictionary of protocol parameters.
+    assets : list, optional
+        A list of assets in the format policyid.name.
 
     Returns
     -------
@@ -34,7 +34,7 @@ def minimum_utxo(assets, params) -> int:
     if params.get("utxoCostPerWord"):
         utxo_cost_word = params.get("utxoCostPerWord")
     else:
-        utxo_cost_word = params.get("utxoCostPerByte")
+        utxo_cost_word = 8*params.get("utxoCostPerByte")
     min_utxo = ada_only_utxo_size * utxo_cost_word
     if len(assets) == 0:
         return min_utxo

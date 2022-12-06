@@ -493,10 +493,10 @@ class WalletHTTP:
 
         # Make sure we send at least the minimum lovelace amount
         min_lovelace = minimum_utxo(
-            [f"{asset.get('policy_id')}.{asset.get('asset_name')}" for asset in assets],
             {
                 "utxoCostPerWord": 34482,  # Const. from Alonzo genesis file
             },
+            [f"{asset.get('policy_id')}.{asset.get('asset_name')}" for asset in assets]
         )
         if lovelace_amount < min_lovelace:
             lovelace_amount = min_lovelace
@@ -564,10 +564,10 @@ class WalletHTTP:
             assets = payment.get("assets") if "assets" in payment.keys() else []
             lovelace_amount = payment.get("amount").get("quantity")
             min_lovelace = minimum_utxo(
-                [f"{asset.get('policy_id')}.{asset.get('asset_name')}" for asset in assets],
                 {
                     "utxoCostPerWord": 34482,  # Const. from Alonzo genesis file
                 },
+                [f"{asset.get('policy_id')}.{asset.get('asset_name')}" for asset in assets],
             )
             if lovelace_amount < min_lovelace:
                 payment["amount"]["quantity"] = min_lovelace
