@@ -767,6 +767,7 @@ class NodeCLI:
         str
             The path to the stake pool registration certificate file.
         """
+
         # Get a working directory to store the generated files and make sure
         # the directory exists.
         if folder is None:
@@ -876,6 +877,72 @@ class NodeCLI:
 
         # Return a list of certificate files
         return certs
+
+    def generate_stake_pool_deregistration_cert(
+        self, remaining_epochs, genesis_file, cold_vkey, folder=None
+    ) -> str:
+        """Generate a stake pool deregistration certificate.
+
+        This function generates a stake pool deregistration certificate. It can
+        be used without connection to a running node for offline applications.
+
+        Parameters
+        ----------
+        remaining_epochs : int
+            Epochs remaining before pool should be deregistered.
+        genesis_file : str or Path
+            Path to the genesis file.
+        cold_vkey : str or Path
+            Path to the pool's cold verification key.
+        cold_skey : str or Path
+            Path to the pool's cold signing key.
+        folder : str or Path, optional
+            The directory where the generated files/certs will be placed.
+
+        Returns
+        -------
+        str
+            The path to the stake pool registration certificate file.
+        """
+
+        # Get a working directory to store the generated files and make sure
+        # the directory exists.
+        if folder is None:
+            folder = self.working_dir
+        else:
+            folder = Path(folder)
+            folder.mkdir(parents=True, exist_ok=True)
+
+        # Get the network genesis parameters
+        with open(genesis_file, "r") as genfile:
+            genesis_parameters = json.load(genfile)
+        epoch_length = genesis_parameters.get("epochLength")
+        e_max = genesis_parameters["protocolParams"].get("eMax")
+
+        # Make sure the remaining epochs is a valid number.
+        if remaining_epochs < 1 or remaining_epochs > e_max:
+            raise NodeCLIError(
+                f"Invalid number of remaining epochs: {remaining_epochs}"
+                f" (min = 1 and max = {e_max})."
+            )
+
+        # Get the pool id
+        pool_id = self.get_stake_pool_id(cold_vkey)
+
+        # Create deregistration certificate
+        ts = datetime.now().strftime("%Y-%m-%d_%Hh%Mm%Ss")
+        pool_cert_path = folder / (pool_id + "_deregistration_" + ts + ".cert")
+        result = self.run_cli(
+            f"{self.cli} stake-pool deregistration-certificate "
+            f"--cold-verification-key-file {cold_vkey} "
+            f"--epoch {self.get_epoch() + remaining_epochs} "
+            f"--out-file {pool_cert_path}"
+        )
+        if result.stderr:
+            raise NodeCLIError(f"Unable to create certificate: {result.stderr}")
+
+        # Return the path to the generated pool cert
+        return pool_cert_path
 
     def build_raw_transaction(
         self,
@@ -1303,6 +1370,14 @@ class NodeCLI:
             folder = Path(folder)
             folder.mkdir(parents=True, exist_ok=True)
 
+        # Generate delegation certificates (pledge from each owner)
+        certs = self.generate_delegation_cert(
+            owner_stake_vkeys + [pool_reward_vkey],
+            pool_cold_vkey,
+            folder=folder,
+        )
+
+        # Generate the pool registration certificate
         pool_cert_path = self.generate_stake_pool_cert(
             pool_name,
             pool_pledge,
@@ -1317,94 +1392,41 @@ class NodeCLI:
             pool_metadata_hash=pool_metadata_hash,
             folder=folder,
         )
-
-        # Generate delegation certificates (pledge from each owner)
-        del_certs = self.generate_delegation_cert(owner_stake_vkeys, pool_cold_vkey, folder=folder)
-        del_cert_args = ""
-        for cert_path in del_certs:
-            del_cert_args += f"--certificate-file {cert_path} "
-
-        # Generate a list of owner signing key args.
-        signing_key_args = ""
-        for key_path in owner_stake_skeys:
-            signing_key_args += f"--signing-key-file {key_path} "
+        certs.append(pool_cert_path)
 
         # Get the pool deposit from the network genesis parameters.
         json_data = self._load_text_file(genesis_file)
         pool_deposit = json.loads(json_data)["protocolParams"]["poolDeposit"]
 
-        # Get a list of UTXOs and sort them in decending order by value.
-        utxos = self.get_utxos(payment_addr)
-        utxos.sort(key=lambda k: k["Lovelace"], reverse=True)
-
-        # Determine the TTL
-        tip = self.get_tip()
-        ttl = tip + self.ttl_buffer
-
-        # Ensure the parameters file exists
-        self.get_protocol_parameters()
-
-        # Iterate through the UTXOs until we have enough funds to cover the
-        # transaction. Also, create the tx_in string for the transaction.
-        tx_name = datetime.now().strftime("reg_pool_%Y-%m-%d_%Hh%Mm%Ss")
-        tx_draft_file = Path(self.working_dir) / (tx_name + ".draft")
-        utxo_total = 0
-        min_fee = 1  # make this start greater than utxo_total
-        tx_in_str = ""
-        for idx, utxo in enumerate(utxos):
-            utxo_count = idx + 1
-            utxo_total += int(utxo["Lovelace"])
-            tx_in_str += f" --tx-in {utxo['TxHash']}#{utxo['TxIx']}"
-
-            # Build a transaction draft
-            self.run_cli(
-                f"{self.cli} transaction build-raw{tx_in_str} "
-                f"--tx-out {payment_addr}+0 --ttl 0 --fee 0 "
-                f"--out-file {tx_draft_file} "
-                f"--certificate-file {pool_cert_path} {del_cert_args}"
-            )
-
-            # Calculate the minimum fee
-            nwit = len(owner_stake_skeys) + 2
-            min_fee = self.calc_min_fee(
-                tx_draft_file, utxo_count, tx_out_count=1, witness_count=nwit
-            )
-
-            if utxo_total > (min_fee + pool_deposit + 10):
-                break
-
-        if utxo_total < (min_fee + pool_deposit):
-            cost_ada = (min_fee + pool_deposit) / 1_000_000
-            utxo_total_ada = utxo_total / 1_000_000
-            raise NodeCLIError(
-                f"Transaction failed due to insufficient funds. Account "
-                f"{payment_addr} cannot pay transaction costs of {cost_ada} "
-                f"lovelaces because it only contains {utxo_total_ada} ADA."
-            )
-
-        # Build the transaction to submit the pool certificate and delegation
-        # certificate(s) to the blockchain.
-        tx_raw_file = Path(self.working_dir) / (tx_name + ".raw")
-        self.run_cli(
-            f"{self.cli} transaction build-raw{tx_in_str} "
-            f"--tx-out {payment_addr}+{utxo_total - min_fee - pool_deposit} "
-            f"--ttl {ttl} --fee {min_fee} --out-file {tx_raw_file} "
-            f"--certificate-file {pool_cert_path} {del_cert_args}"
+        # Create the registration transaction
+        raw_tx = self.build_raw_transaction(
+            payment_addr,
+            witness_count=len(owner_stake_skeys) + 2,
+            certs=[
+                self.generate_stake_pool_cert(
+                    pool_name,
+                    pool_pledge,
+                    pool_cost,
+                    pool_margin,
+                    pool_cold_vkey,
+                    pool_vrf_key,
+                    pool_reward_vkey,
+                    owner_stake_vkeys,
+                    pool_relays,
+                    pool_metadata_url,
+                    pool_metadata_hash,
+                    folder,
+                )
+            ],
+            deposits=pool_deposit,
+            cleanup=cleanup,
         )
 
-        # Sign the transaction with both the payment and stake keys.
-        tx_signed_file = Path(self.working_dir) / (tx_name + ".signed")
-        self.run_cli(
-            f"{self.cli} transaction sign "
-            f"--tx-body-file {tx_raw_file} --signing-key-file {payment_skey} "
-            f"{signing_key_args} --signing-key-file {pool_cold_skey} "
-            f"{self.network} --out-file {tx_signed_file}"
+        # Sign the transaction
+        tx_signed_file = self.sign_transaction(
+            raw_tx,
+            owner_stake_skeys + [pool_cold_skey, payment_skey],
         )
-
-        # Delete the transaction files if specified.
-        if cleanup:
-            self._cleanup_file(tx_draft_file)
-            self._cleanup_file(tx_raw_file)
 
         # Submit the transaction
         if not offline:
@@ -1426,7 +1448,6 @@ class NodeCLI:
         owner_stake_skeys,
         payment_addr,
         payment_skey,
-        genesis_file,
         pool_relays=None,
         pool_metadata_url=None,
         pool_metadata_hash=None,
@@ -1469,8 +1490,6 @@ class NodeCLI:
         payment_skey : str or Path
             Signing key for the address responsible for paying the pool
             registration and transaction fees.
-        genesis_file : str or Path
-            Path to the genesis file.
         pool_relays: list, optional,
             List of dictionaries each representing a pool relay. The
             dictionaries have three required keys:
@@ -1483,7 +1502,7 @@ class NodeCLI:
             Optionally specify the hash of the metadata JSON file. If this is
             not specified and the pool_metadata_hash is, then the code will
             download the file from the URL and compute the hash.
-        folder : str, Path, optional
+        folder : str or Path, optional
             The directory where the generated files/certs will be placed.
         offline: bool, optional
             Flag to indicate if the transactions is being generated offline.
@@ -1502,158 +1521,62 @@ class NodeCLI:
             folder = Path(folder)
             folder.mkdir(parents=True, exist_ok=True)
 
-        # Get the hash of the JSON file if the URL is provided and the hash is
-        # not specified.
-        metadata_args = ""
-        if pool_metadata_url is not None:
-            if pool_metadata_hash is None:
-                metadata_file = folder / "metadata_file_download.json"
-                self._download_file(pool_metadata_url, metadata_file)
-                result = self.run_cli(
-                    f"{self.cli} stake-pool metadata-hash " f"--pool-metadata-file {metadata_file}"
-                )
-                pool_metadata_hash = result.stdout.strip()
-
-            # Create the arg string for the pool cert.
-            metadata_args = (
-                f"--metadata-url {pool_metadata_url} " f"--metadata-hash {pool_metadata_hash}"
-            )
-
-        # Create the relay arg string. Basically, we need a port and host arg
-        # but there can be different forms of the host argument. See the
-        # caradno-cli documentation. The simpliest way I could figure was to
-        # use a list of dictionaries where each dict represents a relay.
-        relay_args = ""
-        for relay in pool_relays:
-            if "ipv4" in relay["host-type"]:
-                host_arg = f"--pool-relay-ipv4 {relay['host']}"
-            elif "ipv6" in relay["host-type"]:
-                host_arg = f"--pool-relay-ipv4 {relay['host']}"
-            elif "single" in relay["host-type"]:
-                host_arg = f"--single-host-pool-relay {relay['host']}"
-            elif "multi" in relay["host-type"]:
-                relay_args += f"--multi-host-pool-relay {relay['host']}"
-                continue  # No port info for this case
-            else:
-                continue  # Skip if invalid host type
-            port_arg = f"--pool-relay-port {relay['port']}"
-            relay_args += f"{host_arg} {port_arg} "
-
-        # Create the argument string for the list of owner verification keys.
-        owner_vkey_args = ""
-        for key_path in owner_stake_vkeys:
-            arg = f"--pool-owner-stake-verification-key-file {key_path} "
-            owner_vkey_args += arg
-
-        # Generate Stake pool registration certificate
-        pool_cert_path = folder / (pool_name + "_registration.cert")
-        self.run_cli(
-            f"{self.cli} stake-pool registration-certificate "
-            f"--cold-verification-key-file {pool_cold_vkey} "
-            f"--vrf-verification-key-file {pool_vrf_key} "
-            f"--pool-pledge {pool_pledge} "
-            f"--pool-cost {pool_cost} "
-            f"--pool-margin {pool_margin/100} "
-            f"--pool-reward-account-verification-key-file {pool_reward_vkey} "
-            f"{owner_vkey_args} {relay_args} {metadata_args} "
-            f"{self.network} --out-file {pool_cert_path}"
+        # Generate delegation certificates (pledge from each owner)
+        certs = self.generate_delegation_cert(
+            owner_stake_vkeys + [pool_reward_vkey],
+            pool_cold_vkey,
+            folder=folder,
         )
 
-        # TODO: Edit the cert free text?
-
-        # Generate delegation certificate (pledge from each owner)
-        del_cert_args = ""
-        signing_key_args = ""
-        for key_path in owner_stake_vkeys:
-            key_path = Path(key_path)
-            cert_path = key_path.parent / (key_path.stem + "_delegation.cert")
-            del_cert_args += f"--certificate-file {cert_path} "
-            self.run_cli(
-                f"{self.cli} stake-address delegation-certificate "
-                f"--stake-verification-key-file {key_path} "
-                f"--cold-verification-key-file {pool_cold_vkey} "
-                f"--out-file {cert_path}"
-            )
-
-        # Generate a list of owner signing key args.
-        for key_path in owner_stake_skeys:
-            signing_key_args += f"--signing-key-file {key_path} "
+        # Generate the pool registration certificate
+        pool_cert_path = self.generate_stake_pool_cert(
+            pool_name,
+            pool_pledge,
+            pool_cost,
+            pool_margin,
+            pool_cold_vkey,
+            pool_vrf_key,
+            pool_reward_vkey,
+            owner_stake_vkeys,
+            pool_relays=pool_relays,
+            pool_metadata_url=pool_metadata_url,
+            pool_metadata_hash=pool_metadata_hash,
+            folder=folder,
+        )
+        certs.append(pool_cert_path)
 
         # Get the pool deposit from the network genesis parameters.
-        pool_deposit = 0  # re-registration doesn't require deposit
+        pool_deposit = 0  # re-registration does not require any additional deposit
 
-        # Get a list of UTXOs and sort them in decending order by value.
-        utxos = self.get_utxos(payment_addr)
-        utxos.sort(key=lambda k: k["Lovelace"], reverse=True)
-
-        # Determine the TTL
-        tip = self.get_tip()
-        ttl = tip + self.ttl_buffer
-
-        # Ensure the parameters file exists
-        self.get_protocol_parameters()
-
-        # Iterate through the UTXOs until we have enough funds to cover the
-        # transaction. Also, create the tx_in string for the transaction.
-        tx_name = datetime.now().strftime("reg_pool_%Y-%m-%d_%Hh%Mm%Ss")
-        tx_draft_file = Path(self.working_dir) / (tx_name + ".draft")
-        utxo_total = 0
-        min_fee = 1  # make this start greater than utxo_total
-        tx_in_str = ""
-        for idx, utxo in enumerate(utxos):
-            utxo_count = idx + 1
-            utxo_total += int(utxo["Lovelace"])
-            tx_in_str += f" --tx-in {utxo['TxHash']}#{utxo['TxIx']}"
-
-            # Build a transaction draft
-            self.run_cli(
-                f"{self.cli} transaction build-raw{tx_in_str} "
-                f"--tx-out {payment_addr}+0 --ttl 0 --fee 0 "
-                f"--out-file {tx_draft_file} "
-                f"--certificate-file {pool_cert_path} {del_cert_args}"
-            )
-
-            # Calculate the minimum fee
-            nwit = len(owner_stake_skeys) + 2
-            min_fee = self.calc_min_fee(
-                tx_draft_file, utxo_count, tx_out_count=1, witness_count=nwit
-            )
-
-            if utxo_total > (min_fee + pool_deposit):
-                break
-
-        if utxo_total < min_fee:
-            cost_ada = (min_fee + pool_deposit) / 1_000_000
-            utxo_total_ada = utxo_total / 1_000_000
-            raise NodeCLIError(
-                f"Transaction failed due to insufficient funds. Account "
-                f"{payment_addr} cannot pay transaction costs of {cost_ada} "
-                f"lovelaces because it only contains {utxo_total_ada} ADA."
-            )
-
-        # Build the transaction to submit the pool certificate and delegation
-        # certificate(s) to the blockchain.
-        tx_raw_file = Path(self.working_dir) / (tx_name + ".raw")
-        self.run_cli(
-            f"{self.cli} transaction build-raw{tx_in_str} "
-            f"--tx-out {payment_addr}+{utxo_total - min_fee - pool_deposit} "
-            f"--ttl {ttl} --fee {min_fee} --out-file {tx_raw_file} "
-            f"--certificate-file {pool_cert_path} {del_cert_args}"
+        # Create the registration transaction
+        raw_tx = self.build_raw_transaction(
+            payment_addr,
+            witness_count=len(owner_stake_skeys) + 2,
+            certs=[
+                self.generate_stake_pool_cert(
+                    pool_name,
+                    pool_pledge,
+                    pool_cost,
+                    pool_margin,
+                    pool_cold_vkey,
+                    pool_vrf_key,
+                    pool_reward_vkey,
+                    owner_stake_vkeys,
+                    pool_relays,
+                    pool_metadata_url,
+                    pool_metadata_hash,
+                    folder,
+                )
+            ],
+            deposits=pool_deposit,
+            cleanup=cleanup,
         )
 
-        # Sign the transaction with both the payment and stake keys.
-        tx_signed_file = Path(self.working_dir) / (tx_name + ".signed")
-        self.run_cli(
-            f"{self.cli} transaction sign "
-            f"--tx-body-file {tx_raw_file} --signing-key-file {payment_skey} "
-            f"{signing_key_args} --signing-key-file {pool_cold_skey} "
-            f"{self.network} --out-file {tx_signed_file}"
+        # Sign the transaction
+        tx_signed_file = self.sign_transaction(
+            raw_tx,
+            owner_stake_skeys + [pool_cold_skey, payment_skey],
         )
-
-        # Delete the transaction files if specified.
-        if cleanup:
-            self._cleanup_file(tx_draft_file)
-            self._cleanup_file(tx_raw_file)
 
         # Submit the transaction
         if not offline:
@@ -1669,7 +1592,7 @@ class NodeCLI:
         cold_skey,
         payment_skey,
         payment_addr,
-        cleanup=True,
+        cleanup=False,
     ):
         """Retire a stake pool using the stake pool keys.
 
@@ -1696,107 +1619,42 @@ class NodeCLI:
             Path to the payment signing key.
         payment_addr : str
             Address of the payment key.
+        folder : str, Path, optional
+            The directory where the generated files/certs will be placed.
+
         cleanup : bool, optional
             Flag that indicates if the temporary transaction files should be
             removed when finished (defaults to True).
         """
 
-        # Get the network parameters
-        self.get_protocol_parameters()
-        e_max = self.get_protocol_parameters().get("eMax")
+        # Get a working directory to store the generated files and make sure
+        # the directory exists.
+        if folder is None:
+            folder = self.working_dir
+        else:
+            folder = Path(folder)
+            folder.mkdir(parents=True, exist_ok=True)
 
-        # Make sure the remaining epochs is a valid number.
-        if remaining_epochs < 1:
-            remaining_epochs = 1
-        elif remaining_epochs > e_max:
-            raise NodeCLIError(
-                f"Invalid number of remaining epochs ({remaining_epochs}) "
-                f"prior to pool retirement. The maximum is {e_max}."
-            )
-
-        # Get the network genesis parameters
-        with open(genesis_file, "r") as genfile:
-            genesis_parameters = json.load(genfile)
-        epoch_length = genesis_parameters["epochLength"]
-
-        # Determine the TTL
-        tip = self.get_tip()
-        ttl = tip + self.ttl_buffer
-
-        # Get the current epoch
-        epoch = tip // epoch_length
-
-        # Create deregistration certificate
-        pool_dereg = self.working_dir / "pool.dereg"
-        self.run_cli(
-            f"{self.cli} stake-pool deregistration-certificate "
-            f"--cold-verification-key-file {cold_vkey} "
-            f"--epoch {epoch + remaining_epochs} --out-file {pool_dereg}"
+        pool_cert = self.generate_stake_pool_deregistration_cert(
+            remaining_epochs, genesis_file, cold_vkey, folder
+        )
+        raw_tx = self.build_raw_transaction(
+            payment_addr,
+            witness_count=2,
+            certs=[pool_cert],
+            cleanup=cleanup,
         )
 
-        # Get a list of UTXOs and sort them in decending order by value.
-        utxos = self.get_utxos(payment_addr)
-        utxos.sort(key=lambda k: k["Lovelace"], reverse=True)
+        # Apply signatures
+        signed_tx = self.sign_transaction(raw_tx, [cold_skey, payment_skey])
 
-        # Iterate through the UTXOs until we have enough funds to cover the
-        # transaction. Also, create the tx_in string for the transaction.
-        tx_draft_file = self.working_dir / "pool_dereg_tx.draft"
-        utxo_total = 0
-        tx_in_str = ""
-        for idx, utxo in enumerate(utxos):
-            utxo_count = idx + 1
-            utxo_total += int(utxo["Lovelace"])
-            tx_in_str += f" --tx-in {utxo['TxHash']}#{utxo['TxIx']}"
-
-            # Build a transaction draft
-            self.run_cli(
-                f"{self.cli} transaction build-raw{tx_in_str} "
-                f"--tx-out {payment_addr}+0 --ttl 0 --fee 0 "
-                f"--out-file {tx_draft_file} --certificate-file {pool_dereg}"
-            )
-
-            # Calculate the minimum fee
-            min_fee = self.calc_min_fee(tx_draft_file, utxo_count, tx_out_count=1, witness_count=2)
-
-            if utxo_total > min_fee:
-                break
-
-        if utxo_total < min_fee:
-            # cost_ada = min_fee/1_000_000
-            utxo_total_ada = utxo_total / 1_000_000
-            raise NodeCLIError(
-                f"Transaction failed due to insufficient funds. Account "
-                f"{payment_addr} cannot pay transaction costs of {min_fee} "
-                f"lovelaces because it only contains {utxo_total_ada} ADA."
-            )
-
-        # Build the raw transaction
-        tx_raw_file = self.working_dir / "pool_dereg_tx.raw"
-        self.run_cli(
-            f"{self.cli} transaction build-raw{tx_in_str} "
-            f"--tx-out {payment_addr}+{utxo_total - min_fee} --ttl {ttl} "
-            f"--fee {min_fee} --out-file {tx_raw_file} "
-            f"--certificate-file {pool_dereg}"
-        )
-
-        # Sign it with both the payment signing key and the cold signing key.
-        tx_signed_file = self.working_dir / "pool_dereg_tx.signed"
-        self.run_cli(
-            f"{self.cli} transaction sign "
-            f"--tx-body-file {tx_raw_file} "
-            f"--signing-key-file {payment_skey} "
-            f"--signing-key-file {cold_skey} "
-            f"{self.network} --out-file {tx_signed_file}"
-        )
-
-        # Submit the transaction
-        self.run_cli(f"{self.cli} transaction submit " f"--tx-file {tx_signed_file} {self.network}")
+        # Send the transaction
+        self.submit_transaction(signed_tx, cleanup=cleanup)
 
         # Delete the transaction files if specified.
         if cleanup:
-            self._cleanup_file(tx_draft_file)
-            self._cleanup_file(tx_raw_file)
-            self._cleanup_file(tx_signed_file)
+            self._cleanup_file(pool_cert)
+            self._cleanup_file(raw_tx)
 
     def get_stake_pool_id(self, cold_vkey) -> str:
         """Return the stake pool ID associated with the supplied cold key.
@@ -1811,7 +1669,9 @@ class NodeCLI:
         str
             The stake pool id.
         """
-        result = self.run_cli(f"{self.cli} stake-pool id " f"--verification-key-file {cold_vkey}")
+        result = self.run_cli(
+            f"{self.cli} stake-pool id " f"--cold-verification-key-file {cold_vkey}"
+        )
         pool_id = result.stdout
         return pool_id
 
@@ -2294,7 +2154,6 @@ class NodeCLI:
         input_str = ""
         input_lovelace = 0
         for i, asset in enumerate(send_assets.keys()):
-
             # Find all the UTxOs containing the assets desired. This may take a
             # while if there are a lot of tokens!
             utxos_found = self.get_utxos(addr, filter=asset)
@@ -2304,7 +2163,6 @@ class NodeCLI:
             # UTxOs.
             asset_count = 0
             for utxo in utxos_found:
-
                 # UTxOs could show up twice if they contain multiple different
                 # assets. Only put them in the list once.
                 if utxo not in utxos:
@@ -2439,14 +2297,8 @@ class NodeCLI:
             return_token_utxo_str += f" + {return_tokens[token]} {token}"
 
         # Calculate the minimum ADA for the token UTxOs.
-        min_utxo_out = utils.minimum_utxo(
-            self.get_protocol_parameters(),
-            output_tokens.keys()
-        )
-        min_utxo_ret = utils.minimum_utxo(
-            self.get_protocol_parameters(),
-            return_tokens.keys()
-        )
+        min_utxo_out = utils.minimum_utxo(self.get_protocol_parameters(), output_tokens.keys())
+        min_utxo_ret = utils.minimum_utxo(self.get_protocol_parameters(), return_tokens.keys())
 
         # Lovelace to send with the Token
         utxo_out = max([min_utxo_out, int(ada * 1_000_000)])
@@ -2516,7 +2368,6 @@ class NodeCLI:
         # If we don't have enough ADA, we will have to add another UTxO to cover
         # the transaction fees.
         if input_lovelace < (min_fee + utxo_ret + utxo_out):
-
             # Iterate through the UTxOs until we have enough funds to cover the
             # transaction. Also, update the tx_in string for the transaction.
             for idx, utxo in enumerate(ada_utxos):
@@ -2546,7 +2397,6 @@ class NodeCLI:
                     input_lovelace - (min_fee + utxo_ret + utxo_out) > minMult * min_utxo
                     and output_str.count("--tx-out ") < 3
                 ):
-
                     self.run_cli(
                         f"{self.cli} transaction build-raw {input_str}"
                         f"{output_str} --tx-out {from_addr}+0 "
@@ -2775,7 +2625,6 @@ class NodeCLI:
             # If we do have enough to cover the needed output and fees, check
             # if we need to add a second UTxO with the extra ADA.
             if utxo_total - (min_fee + utxo_out) > minMult * min_utxo:
-
                 # Create a draft transaction with an extra ADA only UTxO.
                 self.run_cli(
                     f"{self.cli} transaction build-raw {tx_in_str}"
@@ -2964,7 +2813,6 @@ class NodeCLI:
         # If we don't have enough ADA, we will have to add another UTxO to cover
         # the transaction fees.
         if input_lovelace < min_fee + min_utxo_ret:
-
             # Get a list of Lovelace only UTxOs and sort them in ascending order
             # by value.
             ada_utxos = self.get_utxos(payment_addr, filter="Lovelace")
